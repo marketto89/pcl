@@ -59,6 +59,8 @@ using namespace pcl::gpu::people;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+
+
 pcl::gpu::people::PeopleDetector::PeopleDetector() 
     : fx_(525.f), fy_(525.f), cx_(319.5f), cy_(239.5f), delta_hue_tolerance_(5)
 {
@@ -127,6 +129,26 @@ pcl::gpu::people::PeopleDetector::allocate_buffers(int rows, int cols)
   depth_device2_.create(rows, cols);
   fg_mask_.create(rows, cols);
   fg_mask_grown_.create(rows, cols);
+}
+
+Eigen::Vector3f pcl::gpu::people::PeopleDetector::project3dTo2d (Eigen::Vector4f point_3d){
+	Eigen::Vector3f projected_point;
+
+	Eigen::MatrixXf intrinsics(3,3);
+
+	intrinsics << fx_,0,cx_,
+		 0,fy_,cy_,
+		 0,0,1;
+	Eigen::MatrixXf m(3,4);
+	m << 1,0,0,0,
+	 0,1,0,0,
+	 0,0,1,0;
+	Eigen::MatrixXf projection_matrix = intrinsics * m;
+	point_3d=point_3d+Eigen::Vector4f(0,0,0,1);//??
+	projected_point = projection_matrix * point_3d;
+	projected_point /= projected_point(2);
+	return projected_point;
+
 }
 
 int
@@ -232,6 +254,35 @@ pcl::gpu::people::PeopleDetector::process ()
         else
            cerr << "0;";*/
       }
+      //Added to obtain the coordinates of the joints (Lines 245 to 264, by Alina Roitberg)
+
+
+          //Only for the hands:
+          //part_t const bodyParts[] =  {Rhand,Lhand};
+          //char* const bodyParts_str[] = {"Rhand","Lhand"};
+          //int numParts=2;
+
+           //Calculating the tree for each joint
+           Tree2 t3;
+           buildTree(sorted2, cloud_host_,Neck, c, t3);
+           for ( int i = 0; i<24; i++ ){
+
+                    	  		skeleton_joints[i]=Eigen::Vector4f(-1,-1,-1,-1);
+          }
+           for ( int i = 0; i<24; i++ ){
+        	   if (sorted2[i].size()!=0){
+        		   skeleton_joints[i]=sorted2[i].data()->mean;
+        	   }
+                     }
+
+           //skeleton_joints[Neck]=t3.mean;
+           //cerr<<" "<<"total_dist_error : "<< t3.total_dist_error<<std::endl;
+           //cerr<<" "<<"norm_dist_error : "<< t3.norm_dist_error<<std::endl;
+
+          // estimateJoints(sorted2,t3,Neck,0);
+           //skeleton_joints[Neck]=sorted2[Neck].data()->mean;
+
+
       static int counter = 0; // TODO move this logging to PeopleApp
       //cerr << t2.nr_parts << ";" << par << ";" << t2.total_dist_error << ";" << t2.norm_dist_error << ";" << counter++ << ";" << endl;
       return 2;
@@ -241,6 +292,40 @@ pcl::gpu::people::PeopleDetector::process ()
   }
   return 0;
 }
+
+int pcl::gpu::people::PeopleDetector::estimateJoints (const std::vector<std::vector <Blob2, Eigen::aligned_allocator<Blob2> > >&  sorted,
+                             Tree2& tree,
+                             int part_label,
+                             int part_lid)
+      {
+        int nr_children = LUT_nr_children[part_label];
+        tree.parts_lid[part_label] = part_lid;
+
+        const Blob2& blob = sorted[part_label][part_lid];
+
+        // iterate over the number of pixels that are part of this label
+        //const std::vector<int>& indices = blob.indices.indices;
+        //tree.indices.indices.insert(tree.indices.indices.end(), indices.begin(), indices.end());
+
+        if(nr_children == 0)
+          return 0;
+
+        // iterate over all possible children
+        for(int i = 0; i < nr_children; i++)
+        {
+          // check if this child has a valid child_id, leaf test should be redundant
+          if(blob.child_id[i] != NO_CHILD && blob.child_id[i] != LEAF)
+          {
+            //tree.total_dist_error += blob.child_dist[i];
+            skeleton_joints[blob.child_label[i]]=sorted[blob.child_label[i]][blob.child_lid[i]].mean;
+            estimateJoints( sorted, tree, blob.child_label[i], blob.child_lid[i]);
+          }
+        }
+        return 0;
+      }
+
+
+
 
 int
 pcl::gpu::people::PeopleDetector::processProb (const pcl::PointCloud<PointTC>::ConstPtr &cloud)

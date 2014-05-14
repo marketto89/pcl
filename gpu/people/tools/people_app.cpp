@@ -55,12 +55,14 @@
 #include <pcl/io/pcd_io.h>
 #include <pcl/io/png_io.h>
 #include <boost/filesystem.hpp>
+#include <pcl/gpu/people/label_common.h>
 
 #include <iostream>
 
 namespace pc = pcl::console;
 using namespace pcl::visualization;
 using namespace pcl::gpu;
+using namespace pcl::gpu::people;
 using namespace pcl;
 using namespace std;
 
@@ -182,8 +184,22 @@ class PeoplePCDApp
       cmap_host_.height = cmap_device_.rows();
       cmap_host_.points.resize(cmap_host_.width * cmap_host_.height);
       cmap_device_.download(cmap_host_.points, c);
+      final_view_.removeLayer("circle");
+      depth_view_.removeLayer("circle");
+      final_view_.addRGBImage<pcl::RGB>(cmap_host_);
+      part_t wanted_joints[]={Rhand,Lhand,Relbow  ,Lelbow };
+           int num_joints=sizeof(wanted_joints)/sizeof(wanted_joints)[0];
+           for (int i=10; i<24;i++){
 
-      final_view_.showRGBImage<pcl::RGB>(cmap_host_);
+         	  Eigen::Vector4f j=people_detector_.skeleton_joints[i];
+         	  if (j[0]!=-1){
+         	  Eigen::Vector3f j_projected=people_detector_.project3dTo2d(j);
+         	 depth_view_.addCircle((int)j_projected[0],(int)j_projected[1],7.0,"circle",5000);
+         	 final_view_.addCircle((int)j_projected[0],(int)j_projected[1],7.0,"circle",5000);
+         	  }
+           }
+
+
       final_view_.spinOnce(1, true);
 
       if (cloud_cb_)      
@@ -192,9 +208,13 @@ class PeoplePCDApp
         depth_host_.height = people_detector_.depth_device1_.rows();
         depth_host_.points.resize(depth_host_.width * depth_host_.height);        
         people_detector_.depth_device1_.download(depth_host_.points, c);        
-      }      
-      
-      depth_view_.showShortImage(&depth_host_.points[0], depth_host_.width, depth_host_.height, 0, 5000, true);      
+      }
+
+      depth_view_.addShortImage(&depth_host_.points[0], depth_host_.width, depth_host_.height, 0, 4000, true);
+
+
+
+
       depth_view_.spinOnce(1, true);
 
       if (write_)
@@ -306,9 +326,10 @@ class PeoplePCDApp
               ++counter_;              
             }            
            
-            if(has_data && (process_return_ == 2))
-              visualizeAndWrite();
-          }
+            if(has_data && (process_return_ == 2)){
+             visualizeAndWrite();
+            }
+           }
           final_view_.spinOnce (3);                  
         }
         catch (const std::bad_alloc& /*e*/) { cout << "Bad alloc" << endl; }

@@ -46,6 +46,7 @@
 #include <pcl/gpu/containers/device_array.h>
 #include <pcl/gpu/people/label_common.h>
 #include <pcl/gpu/people/tree.h>
+#include <pcl/gpu/people/label_tree.h>
 #include <pcl/gpu/people/person_attribs.h>
 //#include <opencv2/core/core.hpp>
 
@@ -66,6 +67,10 @@ namespace pcl
           typedef boost::shared_ptr<OtherDetector> Ptr;
       };
       */
+    part_t const body_parts[] =  {Lfoot,Lleg, Lknee,Lthigh,Rfoot,Rleg,Rknee,Rthigh,Rhips,Lhips,Neck,Rarm,Relbow,Rforearm,Rhand,Larm,Lelbow,Lforearm,Lhand,FaceLB,FaceRB,FaceLT,FaceRT,Rchest,Lchest};
+    char* const body_parts_str[] = {"Lfoot","Lleg", "Lknee","Lthigh","Rfoot","Rleg","Rknee","Rthigh","Rhips","Lhips","Neck","Rarm","Relbow","Rforearm","Rhand","Larm","Lelbow","Lforearm","Lhand","FaceLB","FaceRB","FaceLT","FaceRT","Rchest","Lchest"};
+    const int num_parts=25;
+
       class PCL_EXPORTS PeopleDetector
       {
         public:
@@ -150,8 +155,17 @@ namespace pcl
           Mask                        fg_mask_;
           Mask                        fg_mask_grown_;
 
-          int
-          process ();
+          Eigen::Vector4f skeleton_joints[num_parts];
+          int estimateJoints (const std::vector<std::vector <Blob2, Eigen::aligned_allocator<Blob2> > >&  sorted,Tree2& tree,int part_label,int part_lid);
+
+
+          int process ();
+
+
+           Eigen::Vector3f
+          	  	 project3dTo2d (Eigen::Vector4f point_3d);
+
+
 
           /**
            * \brief Process the depth based on probabilities supporting tracking, person specific files used
