@@ -209,6 +209,11 @@ pcl::gpu::people::PeopleDetector::process ()
   
   rdf_detector_->process(depth_device1_, cloud_host_, AREA_THRES);
 
+  // This executes the connected components
+   //rdf_detector_->processSmooth(depth_device1_, cloud_host_, AREA_THRES);
+   // This creates the blobmatrix
+  // rdf_detector_->processRelations(person_attribs_);
+
   const RDFBodyPartsDetector::BlobMatrix& sorted = rdf_detector_->getBlobMatrix();
 
   //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -239,7 +244,7 @@ pcl::gpu::people::PeopleDetector::process ()
     const RDFBodyPartsDetector::BlobMatrix& sorted2 = rdf_detector_->getBlobMatrix();
 
     //brief Test if the second tree is build up correctly
-    if(sorted2[Neck].size() != 0)
+    if(sorted2[Neck].size() >0)
     {      
       Tree2 t2;
       buildTree(sorted2, cloud_host_, Neck, c, t2);
@@ -262,26 +267,30 @@ pcl::gpu::people::PeopleDetector::process ()
           //char* const bodyParts_str[] = {"Rhand","Lhand"};
           //int numParts=2;
 
-           //Calculating the tree for each joint
+           //Buuilding the tree beginning from the Neck
            Tree2 t3;
-           buildTree(sorted2, cloud_host_,Neck, c, t3);
-           for ( int i = 0; i<24; i++ ){
+           buildTree(sorted2, cloud_host_,Neck, 0, t3,this->person_attribs_);
+
+           for ( int i = 0; i<num_parts; i++ ){
 
                     	  		skeleton_joints[i]=Eigen::Vector4f(-1,-1,-1,-1);
           }
-           for ( int i = 0; i<24; i++ ){
+
+           for ( int i = 0; i<num_parts; i++ ){
         	   if (sorted2[i].size()!=0){
+
         		   skeleton_joints[i]=sorted2[i].data()->mean;
         	   }
                      }
 
-           //skeleton_joints[Neck]=t3.mean;
+ /*
+           skeleton_joints[Neck]=t3.mean;
            //cerr<<" "<<"total_dist_error : "<< t3.total_dist_error<<std::endl;
            //cerr<<" "<<"norm_dist_error : "<< t3.norm_dist_error<<std::endl;
 
-          // estimateJoints(sorted2,t3,Neck,0);
-           //skeleton_joints[Neck]=sorted2[Neck].data()->mean;
-
+           estimateJoints(sorted2,t3,Neck,0);
+           skeleton_joints[Neck]=sorted2[Neck].data()->mean;
+ */
 
       static int counter = 0; // TODO move this logging to PeopleApp
       //cerr << t2.nr_parts << ";" << par << ";" << t2.total_dist_error << ";" << t2.norm_dist_error << ";" << counter++ << ";" << endl;
@@ -459,6 +468,32 @@ pcl::gpu::people::PeopleDetector::processProb ()
     {
       Tree2 t2;
       buildTree(sorted2, cloud_host_, Neck, c, t2, person_attribs_);
+
+      //Buuilding the tree beginning from the Neck
+                Tree2 t3;
+                buildTree(sorted2, cloud_host_,Neck, 0, t3,this->person_attribs_);
+
+                for ( int i = 0; i<num_parts; i++ ){
+
+                         	  		skeleton_joints[i]=Eigen::Vector4f(-1,-1,-1,-1);
+               }
+                /*
+                for ( int i = 0; i<num_parts; i++ ){
+             	   if (sorted2[i].size()!=0){
+             		   skeleton_joints[i]=sorted2[i].data()->mean;
+             	   }
+                          }
+      */
+
+                skeleton_joints[Neck]=t3.mean;
+                //cerr<<" "<<"total_dist_error : "<< t3.total_dist_error<<std::endl;
+                //cerr<<" "<<"norm_dist_error : "<< t3.norm_dist_error<<std::endl;
+
+                estimateJoints(sorted2,t3,Neck,0);
+                skeleton_joints[Neck]=sorted2[Neck].data()->mean;
+
+
+
       int par = 0;
       for(int f = 0; f < NUM_PARTS; f++)
       {

@@ -172,6 +172,82 @@ class PeoplePCDApp
 
     }
 
+    int drawLimb(int parent, int child){
+
+
+   	  Eigen::Vector4f j1=people_detector_.skeleton_joints[parent];
+   	 Eigen::Vector4f j2=people_detector_.skeleton_joints[child];
+   	  if (j1[0]!=-1 && j2[0]!=-1){
+   	  Eigen::Vector3f j_projected_parent=people_detector_.project3dTo2d(j1);
+   	Eigen::Vector3f j_projected_child=people_detector_.project3dTo2d(j2);
+
+   	depth_view_.addLine((int)j_projected_parent[0],(int)j_projected_parent[1],(int)j_projected_child[0],(int)j_projected_child[1],"limbs",5000);
+   	final_view_.addLine((int)j_projected_parent[0],(int)j_projected_parent[1],(int)j_projected_child[0],(int)j_projected_child[1],"limbs",5000);
+
+
+   	 return 1;
+   	  }
+   	  return -1;
+
+
+    }
+
+void drawAllLimbs(){
+			int i=0;
+
+			final_view_.removeLayer("limbs");
+		    depth_view_.removeLayer("limbs");
+	        // Iterate over all parts
+
+		    drawLimb( Neck, FaceRB);
+		    drawLimb( Neck, FaceLB);
+		    drawLimb( Neck, Rchest);
+		    drawLimb( Neck, Lchest);
+		    drawLimb( Rchest, Rarm);
+		    drawLimb( Rchest, Rhips);
+		    drawLimb( Lchest, Larm);
+		   	drawLimb( Lchest, Lhips);
+		   // drawLimb(Lleg,  Lfoot);
+
+		    //drawLimb(Lknee, Lleg);
+
+		    //drawLimb(Lknee, 2);
+
+	        //drawLimb(Rleg, Rfoot);
+
+	        //drawLimb(Rthigh, Rknee);
+	        //drawLimb(Rhips, Rthigh);
+	       //drawLimb(Lhips, Lthigh);
+
+
+	       i= drawLimb(Rarm, Relbow);
+	       if(i==-1)
+	    	   drawLimb(Rarm, Rforearm);
+
+	       drawLimb(Relbow, Rforearm);
+
+	       drawLimb(Rforearm, Rhand);
+
+	       i=drawLimb(Larm, Lelbow);
+	       if(i==-1)
+	            	drawLimb(Larm, Lforearm);
+
+
+	       drawLimb(Lelbow, Lforearm);
+
+	       drawLimb(Lforearm, Lhand);
+
+	       drawLimb(FaceLB, FaceLT);
+
+	      drawLimb(FaceRB, FaceRT);
+
+
+
+	        }
+
+
+
+
     void
     visualizeAndWrite()
     {
@@ -189,7 +265,7 @@ class PeoplePCDApp
       final_view_.addRGBImage<pcl::RGB>(cmap_host_);
       part_t wanted_joints[]={Rhand,Lhand,Relbow  ,Lelbow };
            int num_joints=sizeof(wanted_joints)/sizeof(wanted_joints)[0];
-           for (int i=10; i<24;i++){
+           for (int i=0; i<25;i++){
 
          	  Eigen::Vector4f j=people_detector_.skeleton_joints[i];
          	  if (j[0]!=-1){
@@ -199,7 +275,7 @@ class PeoplePCDApp
          	  }
            }
 
-
+           drawAllLimbs();
       final_view_.spinOnce(1, true);
 
       if (cloud_cb_)      
