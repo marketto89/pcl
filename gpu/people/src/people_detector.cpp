@@ -36,7 +36,16 @@
 
 #include <pcl/gpu/people/people_detector.h>
 #include <pcl/gpu/people/label_common.h>
-
+#include <pcl/common/eigen.h>
+#include <pcl/common/common.h>
+#include <pcl/filters/filter.h>
+#include <pcl/common/centroid.h>
+#include <pcl/point_types.h>
+#include <pcl/filters/passthrough.h>
+#include <pcl/kdtree/kdtree_flann.h>
+#include <pcl/common/intersections.h>
+#include <pcl/point_types.h>
+#include <pcl/common/common.h>
 //#include <pcl/gpu/people/conversions.h>
 //#include <pcl/gpu/people/label_conversion.h>
 //#include <pcl/gpu/people/label_segment.h>
@@ -45,12 +54,32 @@
 #include <pcl/gpu/people/organized_plane_detector.h>
 #include <pcl/console/print.h>
 #include "internal.h"
+// our headers
+#include "pcl/gpu/people/label_blob2.h"   //this one defines the blob structure
+#include "pcl/gpu/people/label_common.h"  //this one defines the LUT's
+#include "pcl/gpu/people/person_attribs.h"
+
+// std
+#include <vector>
+#include <iostream>
+#include <algorithm>
+#include <stdexcept>
+
+// PCL specific includes
+#include <pcl/conversions.h>
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
+#include <pcl/console/print.h>
+
+#include <pcl/common/eigen.h>
+#include <pcl/common/common.h>
+#include <pcl/common/centroid.h>
 
 #include <pcl/common/time.h>
 
 #define AREA_THRES      200 // for euclidean clusterization 1 
-#define AREA_THRES2     100 // for euclidean clusterization 2 
-#define CLUST_TOL_SHS   0.05
+#define AREA_THRES2     100 // for euclidean clusterization 2
+#define CLUST_TOL_SHS   0.1
 #define DELTA_HUE_SHS   5
 
 using namespace std;
@@ -212,7 +241,7 @@ pcl::gpu::people::PeopleDetector::process ()
   // This executes the connected components
    //rdf_detector_->processSmooth(depth_device1_, cloud_host_, AREA_THRES);
    // This creates the blobmatrix
-  // rdf_detector_->processRelations(person_attribs_);
+   //rdf_detector_->processRelations(person_attribs_);
 
   const RDFBodyPartsDetector::BlobMatrix& sorted = rdf_detector_->getBlobMatrix();
 
@@ -238,14 +267,14 @@ pcl::gpu::people::PeopleDetector::process ()
     device::prepareForeGroundDepth(depth_device1_, fg_mask_grown_, depth_device2_);
 
     //// //////////////////////////////////////////////////////////////////////////////////////////////// //
-    //// The second label evaluation    
-        
-    rdf_detector_->process(depth_device2_, cloud_host_, AREA_THRES2);    
+    //// The second label evaluation
+
+    rdf_detector_->process(depth_device2_, cloud_host_, AREA_THRES2);
     const RDFBodyPartsDetector::BlobMatrix& sorted2 = rdf_detector_->getBlobMatrix();
 
     //brief Test if the second tree is build up correctly
     if(sorted2[Neck].size() >0)
-    {      
+    {
       Tree2 t2;
       buildTree(sorted2, cloud_host_, Neck, c, t2);
       int par = 0;
@@ -271,26 +300,39 @@ pcl::gpu::people::PeopleDetector::process ()
            Tree2 t3;
            buildTree(sorted2, cloud_host_,Neck, 0, t3,this->person_attribs_);
 
-           for ( int i = 0; i<num_parts; i++ ){
-
+           for ( int i = 0; i<num_parts_all; i++ ){
+        	   	   	   	   	   //resetting
                     	  		skeleton_joints[i]=Eigen::Vector4f(-1,-1,-1,-1);
+
           }
 
-           for ( int i = 0; i<num_parts; i++ ){
+           for ( int i = 0; i<num_parts_labeled; i++ ){
         	   if (sorted2[i].size()!=0){
 
-        		   skeleton_joints[i]=sorted2[i].data()->mean;
+        		   skeleton_joints[i]=sorted2[i][0].mean;
+        		   skeleton_blobs[i]=(sorted2[i][0]);
+        		   //skeleton_joints[i]=sorted2[i].data()->mean;
+        		   //skeleton_blobs[i]=*(sorted2[i].data());
         	   }
                      }
 
- /*
+
+
+
+
+/*
+           //cerr<<" "<<t3<< std::endl;
            skeleton_joints[Neck]=t3.mean;
            //cerr<<" "<<"total_dist_error : "<< t3.total_dist_error<<std::endl;
            //cerr<<" "<<"norm_dist_error : "<< t3.norm_dist_error<<std::endl;
 
            estimateJoints(sorted2,t3,Neck,0);
-           skeleton_joints[Neck]=sorted2[Neck].data()->mean;
- */
+           skeleton_blobs[Neck]=sorted2[Neck][0];
+*/
+
+           calculateAddtionalJoints();
+
+
 
       static int counter = 0; // TODO move this logging to PeopleApp
       //cerr << t2.nr_parts << ";" << par << ";" << t2.total_dist_error << ";" << t2.norm_dist_error << ";" << counter++ << ";" << endl;
@@ -300,6 +342,346 @@ pcl::gpu::people::PeopleDetector::process ()
     //output: Tree2 and PointCloud<XYZRGBL> 
   }
   return 0;
+}
+
+int
+pcl::gpu::people::PeopleDetector::calculateIntersectionPoint (Blob2 part1, Blob2 part2, Eigen::Vector4f &intersection_point){
+
+
+
+	Eigen::Matrix3f  cov;
+	Eigen::Vector3f  eigenval;
+	Eigen::Matrix3f  eigenvect;
+
+    pcl::computeCovarianceMatrixNormalized(cloud_host_, part1.indices, part1.mean, cov);
+    pcl::eigen33(cov, eigenvect, eigenval);
+    Eigen::Vector3f  eigenvector_1=eigenvect.col(2);
+
+
+    //getting the eigenvector with max eigenvalue
+    pcl::computeCovarianceMatrixNormalized(cloud_host_, part2.indices, part2.mean, cov);
+    pcl::eigen33(cov, eigenvect, eigenval);
+    Eigen::Vector3f  eigenvector_2=eigenvect.col(2);
+    Eigen::Vector4f point_1=part1.mean;
+   	Eigen::Vector4f point_2=part2.mean;
+    Eigen::VectorXf line_a (6);
+     line_a[0]=point_1[0];
+     line_a[1]=point_1[1];
+     line_a[2]=point_1[2];
+     line_a[3]= eigenvector_1[0];
+     line_a[4]= eigenvector_1[1];
+     line_a[5]= eigenvector_1[2];
+     Eigen::VectorXf line_b (6);
+     line_b[0]=point_2[0];
+     line_b[1]=point_2[1];
+     line_b[2]=point_2[2];
+     line_b[3]=eigenvector_2[0];
+     line_b[4]=eigenvector_2[1];
+     line_b[5]=eigenvector_2[2];
+
+
+     int result=pcl::lineWithLineIntersection(line_a,line_b,intersection_point,0.1);
+     cerr<<" intersection_point"<<intersection_point<< std::endl;
+     cerr<<" result"<<result<< std::endl;
+     return result;
+
+
+
+}
+
+void
+pcl::gpu::people::PeopleDetector::getMaxDist (const pcl::PointCloud<PointXYZ> &cloud,  Eigen::Vector4f &pivot_pt, Eigen::Vector4f &max_pt)
+{
+  float max_dist = -FLT_MAX;
+  int max_idx = -1;
+  float dist;
+
+  // If the data is dense, we don't need to check for NaN
+  if (cloud.is_dense)
+  {
+    for (size_t i = 0; i < cloud.points.size (); ++i)
+    {
+    	Eigen::Vector4f pt;
+    	      pt[0]=cloud.points[i].x;
+    	      pt[1]=cloud.points[i].y;
+    	      pt[2]=cloud.points[i].z;
+    	      pt[3]=0.0;
+      dist = (pivot_pt - pt).norm ();
+      if (dist > max_dist)
+      {
+        max_idx = int (i);
+        max_dist = dist;
+      }
+    }
+  }
+  // NaN or Inf values could exist => check for them
+  else
+  {
+    for (size_t i = 0; i < cloud.points.size (); ++i)
+    {
+      // Check if the point is invalid
+      if (!pcl_isfinite (cloud.points[i].x) || !pcl_isfinite (cloud.points[i].y) || !pcl_isfinite (cloud.points[i].z))
+        continue;
+      Eigen::Vector4f pt;
+      pt[0]=cloud.points[i].x;
+      pt[1]=cloud.points[i].y;
+      pt[2]=cloud.points[i].z;
+      pt[3]=0.0;
+      dist = (pivot_pt - pt).norm ();
+      if (dist > max_dist)
+      {
+        max_idx = int (i);
+        max_dist = dist;
+      }
+    }
+  }
+
+  if(max_idx != -1){
+	  max_pt[0]=cloud.points[max_idx].x;
+	  max_pt[1]=cloud.points[max_idx].y;
+	  max_pt[2]=cloud.points[max_idx].z;
+	  max_pt[3]=0.0;
+  }
+
+  else
+    max_pt = Eigen::Vector4f(0,0,0,0);
+}
+
+
+
+void pcl::gpu::people::PeopleDetector::calculateAddtionalJoints(){
+
+	Eigen::Vector4f intersection_point;
+	Eigen::Vector4f min;
+	Eigen::Vector4f max;
+	pcl::getMinMax3D(cloud_host_,skeleton_blobs[Rchest].indices, min, max);
+	 pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_filtered (new pcl::PointCloud<pcl::PointXYZ>);
+	 pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_initial(new pcl::PointCloud<pcl::PointXYZ>(cloud_host_,skeleton_blobs[Rchest].indices.indices));
+	 pcl::PassThrough<pcl::PointXYZ> pass;
+
+
+	 //Right shoulder
+	 pass.setInputCloud (cloud_initial);
+	 pass.setFilterFieldName ("y");
+	 double minval=min[1];//y
+	 double maxval=max[1];//y
+	 pass.setFilterLimits (-100.0,minval+0.1);
+	 pass.filter (*cloud_filtered);
+	 //cerr<<" min"<<min<< std::endl;
+	 //cerr<<" cloud_unfiltered.size"<<cloud->size()<< std::endl;
+	 //cerr<<" cloud_filtered.size"<<cloud_filtered->size()<< std::endl;
+	 pcl::compute3DCentroid(*cloud_filtered,intersection_point);
+	 skeleton_joints[Rshoulder]=intersection_point;
+	// cerr<<" intersection_point (Rshoulder)"<<intersection_point<< std::endl;
+
+	 //Left shoulder
+	 pcl::getMinMax3D(cloud_host_,skeleton_blobs[Lchest].indices, min, max);
+
+	// boost::shared_ptr<pcl::PointCloud<PointXYZ> >(new pcl::PointCloud<PointXYZ>(*cloud_filtered));
+	 pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<PointXYZ>(*cloud_filtered)); //resetting
+	 cloud_initial= pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>(cloud_host_,skeleton_blobs[Lchest].indices.indices));
+	 //cloud_initial->PointCloud(cloud_host_,skeleton_blobs[Lchest].indices.indices);
+	 //cloud_initial.reset()
+	 	 pass.setInputCloud (cloud_initial);
+	 	 pass.setFilterFieldName ("y");
+	 	 minval=min[1];//y
+	 	  maxval=max[1];//y
+	 	pass.setFilterLimits (-100.0,minval+0.1);
+	 	 //pass.setFilterLimitsNegative (true);
+	 	 pass.filter (*cloud_filtered);
+	 	 //cerr<<" min"<<min<< std::endl;
+	 	 //cerr<<" cloud_unfiltered.size"<<cloud->size()<< std::endl;
+	 	 //cerr<<" cloud_filtered.size"<<cloud_filtered->size()<< std::endl;
+	 	 pcl::compute3DCentroid(*cloud_filtered,intersection_point);
+	 	 skeleton_joints[Lshoulder]=intersection_point;
+	 	// cerr<<" intersection_point (Lshoulder)"<<intersection_point<< std::endl;
+
+/*
+	 	if (skeleton_joints[Lelbow][0]==-1 || true){
+	 		 pcl::getMinMax3D(cloud_host_,skeleton_blobs[Larm].indices, min, max);
+
+	 		cloud_initial= pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>(cloud_host_,skeleton_blobs[Larm].indices.indices));
+
+
+
+	 			 	 pass.setInputCloud (cloud_initial);
+	 			 	 pass.setFilterFieldName ("y");
+	 			 	 minval=min[1];//y
+	 			 	  maxval=max[1];//y
+	 			 	pass.setFilterLimits (maxval-0.05,100.0);
+	 			 	 //pass.setFilterLimitsNegative (true);
+	 			 	 pass.filter (*cloud_filtered);
+	 			 	 //cerr<<" min"<<min<< std::endl;
+	 			 	 //cerr<<" cloud_unfiltered.size"<<cloud->size()<< std::endl;
+	 			 	 //cerr<<" cloud_filtered.size"<<cloud_filtered->size()<< std::endl;
+	 			 	 pcl::compute3DCentroid(*cloud_filtered,intersection_point);
+	 			 	 skeleton_joints[Lelbow]=intersection_point;
+
+	 		 	}
+
+	 	if (skeleton_joints[Relbow][0]==-1 || true){
+
+	 		 pcl::getMinMax3D(cloud_host_,skeleton_blobs[Rarm].indices, min, max);
+
+	 		cloud_initial= pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>(cloud_host_,skeleton_blobs[Rarm].indices.indices));
+	 		pass.setInputCloud (cloud_initial);
+	 			 	 pass.setFilterFieldName ("y");
+	 			 	 minval=min[1];//y
+	 			 	  maxval=max[1];//y
+	 			 	pass.setFilterLimits (maxval-0.05,100.0);
+	 			 	 //pass.setFilterLimitsNegative (true);
+	 			 	 pass.filter (*cloud_filtered);
+	 			 	 //cerr<<" min"<<min<< std::endl;
+	 			 	 //cerr<<" cloud_unfiltered.size"<<cloud->size()<< std::endl;
+	 			 	 //cerr<<" cloud_filtered.size"<<cloud_filtered->size()<< std::endl;
+	 			 	 pcl::compute3DCentroid(*cloud_filtered,intersection_point);
+	 			 	 skeleton_joints[Relbow]=intersection_point;
+
+
+
+	 	}
+	 	*/
+
+
+	 		//Calculating the Elbows, v2
+
+	 	std::vector<int> indices;
+	 	if (skeleton_joints[Lelbow][0]==-1 ){
+	 	cloud_initial= pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>(cloud_host_,skeleton_blobs[Larm].indices.indices));
+
+	 	getMaxDist(*cloud_initial,skeleton_joints[Lshoulder],intersection_point);
+	 	skeleton_joints[Lelbow]=intersection_point;
+	 	pass.setFilterFieldName ("y");
+	 		 	 minval=min[1];//y
+	 		 	  maxval=max[1];//y
+	 		 	pass.setFilterLimits (float(intersection_point[1]-0.05),float(intersection_point[1]-0.05));
+	 		 	 pass.filter (*cloud_initial);
+	 		 	pcl::compute3DCentroid(*cloud_initial,intersection_point);
+	 		 	 //pass.setFilterLimitsNegative (true);
+
+	 	}
+		if (skeleton_joints[Relbow][0]==-1 ){
+		 	cloud_initial= pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>(cloud_host_,skeleton_blobs[Rarm].indices.indices));
+
+		 	getMaxDist(*cloud_initial,skeleton_joints[Rshoulder],intersection_point);
+		 	skeleton_joints[Relbow]=intersection_point;
+		 	pass.setFilterFieldName ("y");
+		 		 	 minval=min[1];//y
+		 		 	  maxval=max[1];//y
+		 		 	pass.setFilterLimits (float(intersection_point[1]-0.05),float(intersection_point[1]-0.05));
+		 		 	 pass.filter (*cloud_initial);
+		 		 	pcl::compute3DCentroid(*cloud_initial,intersection_point);
+		 		 	 //pass.setFilterLimitsNegative (true);
+
+		 	}
+
+
+
+		//Calculating the hips
+
+		//Right hip
+			 cloud_initial= pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>(cloud_host_,skeleton_blobs[Rhips].indices.indices));
+			 pass.setInputCloud (cloud_initial);
+			 pass.setFilterFieldName ("y");
+			 pcl::getMinMax3D(cloud_host_,skeleton_blobs[Rhips].indices, min, max);
+			 minval=min[1];//y
+			 maxval=max[1];//y
+			 pass.setFilterLimits (maxval-0.1,100.0);
+			 pass.filter (*cloud_filtered);
+			 pcl::compute3DCentroid(*cloud_filtered,intersection_point);
+			 skeleton_joints[Rhips]=intersection_point;
+
+
+		 //Left hip
+			 cloud_initial= pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>(cloud_host_,skeleton_blobs[Lhips].indices.indices));
+			 pass.setInputCloud (cloud_initial);
+			 pass.setFilterFieldName ("y");
+			 pcl::getMinMax3D(cloud_host_,skeleton_blobs[Lhips].indices, min, max);
+			 minval=min[1];//y
+			 maxval=max[1];//y
+			 pass.setFilterLimits (maxval-0.1,100.0);
+			 pass.filter (*cloud_filtered);
+			 pcl::compute3DCentroid(*cloud_filtered,intersection_point);
+			 skeleton_joints[Lhips]=intersection_point;
+
+
+
+
+
+	  	//std::vector<int> indices;
+
+
+
+	 		 		 			 	 /*
+	 	if (skeleton_joints[Lelbow][0]==-1){
+
+	 		 		//cloud_initial= pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>(cloud_host_,skeleton_blobs[Larm].indices.indices));
+
+	 		 		//Eigen::Vector4f lshoulder= skeleton_joints[Lshoulder];
+
+	 		 		pcl::getMaxDistance(cloud_host_,skeleton_blobs[Larm].indices.indices,skeleton_joints[Lshoulder],intersection_point);
+	 		 			 	 skeleton_joints[Lelbow]=intersection_point;
+
+	 		 		 	}
+
+	 		 	if (skeleton_joints[Relbow][0]==-1){
+
+	 		 		 pcl::getMinMax3D(cloud_host_,skeleton_blobs[Rarm].indices, min, max);
+
+	 		 		cloud_initial= pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>(cloud_host_,skeleton_blobs[Rarm].indices.indices));
+	 		 		pass.setInputCloud (cloud_initial);
+	 		 			 	 pass.setFilterFieldName ("y");
+	 		 			 	 minval=min[1];//y
+	 		 			 	  maxval=max[1];//y
+	 		 			 	pass.setFilterLimits (maxval-0.05,100.0);
+	 		 			 	 //pass.setFilterLimitsNegative (true);
+	 		 			 	 pass.filter (*cloud_filtered);
+	 		 			 	 //cerr<<" min"<<min<< std::endl;
+	 		 			 	 //cerr<<" cloud_unfiltered.size"<<cloud->size()<< std::endl;
+	 		 			 	 //cerr<<" cloud_filtered.size"<<cloud_filtered->size()<< std::endl;
+	 		 			 	 pcl::compute3DCentroid(*cloud_filtered,intersection_point);
+	 		 			 	 skeleton_joints[Relbow]=intersection_point;
+
+
+
+	 		 	}
+
+
+*/
+/*
+	pcl::getMaxDistance(cloud_host_,skeleton_blobs[Rchest].indices.indices,skeleton_joints[Rchest],intersection_point);
+
+
+	skeleton_joints[Rshoulder]=intersection_point;
+	 cerr<<" points"<<cloud_host_. << std::endl;
+	 cerr<<" Rshoulder"<<intersection_point<< std::endl;
+	 cerr<<" Rchest mean"<<skeleton_joints[Rchest]<< std::endl;
+	pcl::getMaxDistance(cloud_host_,skeleton_blobs[Lchest].indices.indices,skeleton_joints[Lhips],intersection_point);
+
+		skeleton_joints[Lshoulder]=intersection_point;
+
+
+	if (calculateIntersectionPoint (skeleton_blobs[Rarm], skeleton_blobs[Rchest], intersection_point)==1){
+		skeleton_joints[Rshoulder]=intersection_point;
+		 cerr<<" intersection_point 2"<<intersection_point<< std::endl;
+	}
+
+	if (calculateIntersectionPoint (skeleton_blobs[Larm], skeleton_blobs[Lchest], intersection_point)==1){
+			skeleton_joints[Lshoulder]=intersection_point;
+			 cerr<<" intersection_point 2"<<intersection_point<< std::endl;
+		}
+
+	if (skeleton_joints[Relbow][0]==-1 && calculateIntersectionPoint (skeleton_blobs[Rarm], skeleton_blobs[Rforearm], intersection_point)==1){
+					skeleton_joints[Relbow]=intersection_point;
+				}
+
+	if (skeleton_joints[Lelbow][0]==-1 && calculateIntersectionPoint (skeleton_blobs[Larm], skeleton_blobs[Lforearm], intersection_point)==1){
+				skeleton_joints[Lelbow]=intersection_point;
+			}
+			*/
+
+
+
 }
 
 int pcl::gpu::people::PeopleDetector::estimateJoints (const std::vector<std::vector <Blob2, Eigen::aligned_allocator<Blob2> > >&  sorted,
@@ -327,6 +709,7 @@ int pcl::gpu::people::PeopleDetector::estimateJoints (const std::vector<std::vec
           {
             //tree.total_dist_error += blob.child_dist[i];
             skeleton_joints[blob.child_label[i]]=sorted[blob.child_label[i]][blob.child_lid[i]].mean;
+            skeleton_blobs[blob.child_label[i]]=sorted[blob.child_label[i]][blob.child_lid[i]];
             estimateJoints( sorted, tree, blob.child_label[i], blob.child_lid[i]);
           }
         }
@@ -471,20 +854,27 @@ pcl::gpu::people::PeopleDetector::processProb ()
 
       //Buuilding the tree beginning from the Neck
                 Tree2 t3;
+                cerr<<" "<<t3<< std::endl;
+
                 buildTree(sorted2, cloud_host_,Neck, 0, t3,this->person_attribs_);
 
-                for ( int i = 0; i<num_parts; i++ ){
+                for ( int i = 0; i<num_parts_labeled; i++ ){
 
                          	  		skeleton_joints[i]=Eigen::Vector4f(-1,-1,-1,-1);
                }
-                /*
-                for ( int i = 0; i<num_parts; i++ ){
+
+                for ( int i = 0; i<num_parts_labeled; i++ ){
              	   if (sorted2[i].size()!=0){
              		   skeleton_joints[i]=sorted2[i].data()->mean;
              	   }
                           }
-      */
 
+                //computing shoulders
+               // if (sorted2[Rarm].size()!=0 && sorted2[Rchest].size()!=0){
+                //	Eigen::Vector4f v1=sorted2[Rarm].data()->eigenvect;
+                //}
+
+                /*
                 skeleton_joints[Neck]=t3.mean;
                 //cerr<<" "<<"total_dist_error : "<< t3.total_dist_error<<std::endl;
                 //cerr<<" "<<"norm_dist_error : "<< t3.norm_dist_error<<std::endl;
@@ -492,6 +882,7 @@ pcl::gpu::people::PeopleDetector::processProb ()
                 estimateJoints(sorted2,t3,Neck,0);
                 skeleton_joints[Neck]=sorted2[Neck].data()->mean;
 
+*/
 
 
       int par = 0;

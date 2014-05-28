@@ -46,6 +46,8 @@
 #include <pcl/gpu/containers/device_array.h>
 #include <pcl/gpu/people/label_common.h>
 #include <pcl/gpu/people/tree.h>
+#include <pcl/common/eigen.h>
+
 #include <pcl/gpu/people/label_tree.h>
 #include <pcl/gpu/people/person_attribs.h>
 //#include <opencv2/core/core.hpp>
@@ -54,6 +56,8 @@
 #include <pcl/gpu/people/face_detector.h>
 #include <pcl/gpu/people/organized_plane_detector.h>
 #include <pcl/gpu/people/probability_processor.h>
+
+
 
 namespace pcl
 {
@@ -67,9 +71,10 @@ namespace pcl
           typedef boost::shared_ptr<OtherDetector> Ptr;
       };
       */
-    part_t const body_parts[] =  {Lfoot,Lleg, Lknee,Lthigh,Rfoot,Rleg,Rknee,Rthigh,Rhips,Lhips,Neck,Rarm,Relbow,Rforearm,Rhand,Larm,Lelbow,Lforearm,Lhand,FaceLB,FaceRB,FaceLT,FaceRT,Rchest,Lchest};
-    char* const body_parts_str[] = {"Lfoot","Lleg", "Lknee","Lthigh","Rfoot","Rleg","Rknee","Rthigh","Rhips","Lhips","Neck","Rarm","Relbow","Rforearm","Rhand","Larm","Lelbow","Lforearm","Lhand","FaceLB","FaceRB","FaceLT","FaceRT","Rchest","Lchest"};
-    const int num_parts=25;
+    //part_t const body_parts[] =  {Lfoot,Lleg, Lknee,Lthigh,Rfoot,Rleg,Rknee,Rthigh,Rhips,Lhips,Neck,Rarm,Relbow,Rforearm,Rhand,Larm,Lelbow,Lforearm,Lhand,FaceLB,FaceRB,FaceLT,FaceRT,Rchest,Lchest};
+    //char* const body_parts_str[] = {"Lfoot","Lleg", "Lknee","Lthigh","Rfoot","Rleg","Rknee","Rthigh","Rhips","Lhips","Neck","Rarm","Relbow","Rforearm","Rhand","Larm","Lelbow","Lforearm","Lhand","FaceLB","FaceRB","FaceLT","FaceRT","Rchest","Lchest"};
+    const int num_parts_labeled=25;
+    const int num_parts_all=27;//including shoulders
 
       class PCL_EXPORTS PeopleDetector
       {
@@ -155,8 +160,14 @@ namespace pcl
           Mask                        fg_mask_;
           Mask                        fg_mask_grown_;
 
-          Eigen::Vector4f skeleton_joints[num_parts];
+          Eigen::Vector4f skeleton_joints[num_parts_labeled];
+          Blob2 skeleton_blobs[num_parts_all];
           int estimateJoints (const std::vector<std::vector <Blob2, Eigen::aligned_allocator<Blob2> > >&  sorted,Tree2& tree,int part_label,int part_lid);
+          int calculateIntersectionPoint (Blob2 part1, Blob2 part2, Eigen::Vector4f &intersection_point);
+          void calculateAddtionalJoints();
+
+          void getMaxDist (const pcl::PointCloud<PointXYZ> &cloud,  Eigen::Vector4f &pivot_pt, Eigen::Vector4f &max_pt);
+
 
 
           int process ();

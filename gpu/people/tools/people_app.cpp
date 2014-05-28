@@ -56,7 +56,9 @@
 #include <pcl/io/png_io.h>
 #include <boost/filesystem.hpp>
 #include <pcl/gpu/people/label_common.h>
-
+#include <iostream>
+#include <fstream>
+#include<ctime>
 #include <iostream>
 
 namespace pc = pcl::console;
@@ -139,7 +141,7 @@ class PeoplePCDApp
 {
   public:
     typedef pcl::gpu::people::PeopleDetector PeopleDetector;
-
+    ofstream skeleton_file;
     enum { COLS = 640, ROWS = 480 };
 
     PeoplePCDApp (pcl::Grabber& capture, bool write)
@@ -151,6 +153,7 @@ class PeoplePCDApp
         counter_(0),
         final_view_("Final labeling"),
         depth_view_("Depth")
+
     {
       final_view_.setSize (COLS, ROWS);
       depth_view_.setSize (COLS, ROWS);
@@ -170,6 +173,8 @@ class PeoplePCDApp
 
       people::uploadColorMap(color_map_);
 
+
+
     }
 
     int drawLimb(int parent, int child){
@@ -177,7 +182,7 @@ class PeoplePCDApp
 
    	  Eigen::Vector4f j1=people_detector_.skeleton_joints[parent];
    	 Eigen::Vector4f j2=people_detector_.skeleton_joints[child];
-   	  if (j1[0]!=-1 && j2[0]!=-1){
+   	  if (j1[0]!=-1 && j2[0]!=-1 &&abs(double(j1[2]))<100.0 && abs(double(j2[2]))<100.0){
    	  Eigen::Vector3f j_projected_parent=people_detector_.project3dTo2d(j1);
    	Eigen::Vector3f j_projected_child=people_detector_.project3dTo2d(j2);
 
@@ -201,42 +206,24 @@ void drawAllLimbs(){
 
 		    drawLimb( Neck, FaceRB);
 		    drawLimb( Neck, FaceLB);
-		    drawLimb( Neck, Rchest);
-		    drawLimb( Neck, Lchest);
-		    drawLimb( Rchest, Rarm);
+		    drawLimb( Neck, Rshoulder);
+		    drawLimb( Neck, Lshoulder);
+		    drawLimb( Rshoulder, Rarm);
+		    drawLimb( Lshoulder, Larm);
+		    drawLimb( Rshoulder, Rchest);
+		    drawLimb( Lshoulder, Lchest);
 		    drawLimb( Rchest, Rhips);
-		    drawLimb( Lchest, Larm);
 		   	drawLimb( Lchest, Lhips);
-		   // drawLimb(Lleg,  Lfoot);
+		    drawLimb(Lhips,  Lknee);
+		    drawLimb(Rhips,  Rknee);
 
-		    //drawLimb(Lknee, Lleg);
+		    drawLimb(Lknee, Lfoot);
+		    drawLimb(Rknee, Rfoot);
 
-		    //drawLimb(Lknee, 2);
-
-	        //drawLimb(Rleg, Rfoot);
-
-	        //drawLimb(Rthigh, Rknee);
-	        //drawLimb(Rhips, Rthigh);
-	       //drawLimb(Lhips, Lthigh);
-
-
-	       i= drawLimb(Rarm, Relbow);
-	       if(i==-1)
-	    	   drawLimb(Rarm, Rforearm);
-
-	       drawLimb(Relbow, Rforearm);
-
-	       drawLimb(Rforearm, Rhand);
-
-	       i=drawLimb(Larm, Lelbow);
-	       if(i==-1)
-	            	drawLimb(Larm, Lforearm);
-
-
-	       drawLimb(Lelbow, Lforearm);
-
-	       drawLimb(Lforearm, Lhand);
-
+		    drawLimb(Rshoulder, Relbow);
+	       drawLimb(Relbow, Rhand);
+	       drawLimb(Lshoulder, Lelbow);
+	       drawLimb(Lelbow, Lhand);
 	       drawLimb(FaceLB, FaceLT);
 
 	      drawLimb(FaceRB, FaceRT);
@@ -265,15 +252,19 @@ void drawAllLimbs(){
       final_view_.addRGBImage<pcl::RGB>(cmap_host_);
       part_t wanted_joints[]={Rhand,Lhand,Relbow  ,Lelbow };
            int num_joints=sizeof(wanted_joints)/sizeof(wanted_joints)[0];
-           for (int i=0; i<25;i++){
+
+
+           for (int i=0; i<27;i++){
 
          	  Eigen::Vector4f j=people_detector_.skeleton_joints[i];
          	  if (j[0]!=-1){
          	  Eigen::Vector3f j_projected=people_detector_.project3dTo2d(j);
-         	 depth_view_.addCircle((int)j_projected[0],(int)j_projected[1],7.0,"circle",5000);
-         	 final_view_.addCircle((int)j_projected[0],(int)j_projected[1],7.0,"circle",5000);
+         	 depth_view_.addCircle((int)j_projected[0],(int)j_projected[1],10.0,"circle",5000);
+         	 final_view_.addCircle((int)j_projected[0],(int)j_projected[1],10.0,"circle",5000);
+
          	  }
            }
+
 
            drawAllLimbs();
       final_view_.spinOnce(1, true);
@@ -304,6 +295,17 @@ void drawAllLimbs(){
         savePNGFile(make_name(counter_, "s2"), labels);
         savePNGFile(make_name(counter_, "d1"), people_detector_.depth_device1_);
         savePNGFile(make_name(counter_, "d2"), people_detector_.depth_device2_);
+        skeleton_file.open("./skeleton.txt", std::ios::app);
+        skeleton_file << "\n"<<counter_<<";"<<time_ms_<<";";
+        for (int i=0; i<27;i++){
+
+                	  Eigen::Vector4f j=people_detector_.skeleton_joints[i];
+                	  skeleton_file<<"{"<<j[0]<<","<<j[1]<<","<<j[2]<<"};";
+
+
+                  }
+        skeleton_file<<" ";
+        skeleton_file.close();
       }
     }
         
@@ -479,6 +481,7 @@ int main(int argc, char** argv)
   bool write = 0;
   pc::parse_argument (argc, argv, "-w", write);
 
+
   // selecting data source
   boost::shared_ptr<pcl::Grabber> capture;
   string openni_device, oni_file, pcd_file, pcd_folder;  
@@ -555,7 +558,7 @@ int main(int argc, char** argv)
     // executing
     app.startMainLoop ();
   }
-  catch (const pcl::PCLException& e) { cout << "PCLException: " << e.detailedMessage() << endl; print_help();}
+  catch (const pcl::PCLException& e) { cout << "PCLException: " << e.detailedMessage() << endl; print_help(); }
   catch (const std::runtime_error& e) { cout << e.what() << endl; print_help(); }
   catch (const std::bad_alloc& /*e*/) { cout << "Bad alloc" << endl; print_help(); }
   catch (const std::exception& /*e*/) { cout << "Exception" << endl; print_help(); }
