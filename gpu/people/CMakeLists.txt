@@ -1,7 +1,7 @@
 set(SUBSYS_NAME gpu_people)
 set(SUBSYS_PATH gpu/people)
 set(SUBSYS_DESC "Point cloud people library")
-set(SUBSYS_DEPS common features filters geometry gpu_containers gpu_utils io kdtree octree search segmentation surface visualization)
+set(SUBSYS_DEPS common features filters geometry gpu_containers gpu_utils io kdtree octree search segmentation surface visualization sample_consensus people)
 
 set(build FALSE)
 PCL_SUBSYS_OPTION(build ${SUBSYS_NAME} ${SUBSYS_DESC} OFF)
@@ -37,7 +37,7 @@ if(build)
   source_group("Source files" FILES ${srcs} )    
 
   include_directories(${VTK_INCLUDE_DIRS}
-                      "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}/src/cuda" "${CMAKE_CURRENT_SOURCE_DIR}/src/cuda/nvidia")
+                      "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}/src/cuda" "${CMAKE_CURRENT_SOURCE_DIR}/src/cuda/nvidia" ${PCL_INCLUDE_DIRS})
   #include_directories("${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}/src/cuda")
   include_directories(${OpenCV_INCLUDE_DIRS} ${CUDA_INCLUDE_DIRS})
 
@@ -53,7 +53,7 @@ if(build)
   set(LIB_NAME "pcl_${SUBSYS_NAME}")
 
   PCL_ADD_LIBRARY("${LIB_NAME}" "${SUBSYS_NAME}" ${srcs} ${hdrs} ${srcs_cuda} ${objs_cuda})
-  target_link_libraries("${LIB_NAME}" pcl_common pcl_io pcl_search pcl_surface pcl_segmentation pcl_features pcl_sample_consensus pcl_gpu_utils pcl_gpu_containers "${CUDA_CUDART_LIBRARY}" ${CUDA_npp_LIBRARY})
+  target_link_libraries("${LIB_NAME}" pcl_common pcl_io pcl_search pcl_surface pcl_segmentation pcl_features pcl_people pcl_sample_consensus pcl_gpu_utils pcl_gpu_containers "${CUDA_CUDART_LIBRARY}" ${CUDA_npp_LIBRARY})
   PCL_MAKE_PKGCONFIG("${LIB_NAME}" "${SUBSYS_NAME}" "${SUBSYS_DESC}" "${SUBSYS_DEPS}" "" "" "" "")
 
   # install include files

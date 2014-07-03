@@ -77,6 +77,15 @@
 
 #include <pcl/common/time.h>
 
+//for people detection
+
+#include <pcl/console/parse.h>
+#include <pcl/point_types.h>
+#include <pcl/visualization/pcl_visualizer.h>
+#include <pcl/io/openni_grabber.h>
+//#include <pcl/people/ground_based_people_detection_app.h>
+#include <pcl/sample_consensus/sac_model_plane.h>
+
 #define AREA_THRES      200 // for euclidean clusterization 1 
 #define AREA_THRES2     100 // for euclidean clusterization 2
 #define CLUST_TOL_SHS   0.1
@@ -235,7 +244,7 @@ pcl::gpu::people::PeopleDetector::process ()
 {
   int cols = cloud_device_.cols();
   int rows = cloud_device_.rows();      
-  
+  //cloud_host_[0].z=1000.0;
   rdf_detector_->process(depth_device1_, cloud_host_, AREA_THRES);
 
   // This executes the connected components
@@ -305,6 +314,9 @@ pcl::gpu::people::PeopleDetector::process ()
                     	  		skeleton_joints[i]=Eigen::Vector4f(-1,-1,-1,-1);
 
           }
+
+
+
 
            for ( int i = 0; i<num_parts_labeled; i++ ){
         	   if (sorted2[i].size()!=0){
