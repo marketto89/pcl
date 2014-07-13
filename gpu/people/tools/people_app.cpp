@@ -37,8 +37,7 @@
  * @brief This file is the execution node of the Human Tracking
  * @copyright Copyright (2011) Willow Garage
  * @authors Koen Buys, Anatoly Baksheev
- **/
-#include <pcl/pcl_base.h>
+ **/#include <pcl/pcl_base.h>
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
 #include <pcl/common/time.h>
@@ -52,25 +51,32 @@
 #include <pcl/io/openni_grabber.h>
 #include <pcl/io/oni_grabber.h>
 #include <pcl/io/pcd_grabber.h>
-#include <pcl/io/image_grabber.h>
 #include <pcl/io/pcd_io.h>
 #include <pcl/io/png_io.h>
 #include <boost/filesystem.hpp>
-#include <pcl/gpu/people/label_common.h>
+
+
+//new includes
+#include <pcl/io/lzf_image_io.h>
 #include <iostream>
 #include <fstream>
+#include <pcl/io/image_grabber.h>
+#include <pcl/gpu/people/label_common.h>
 #include<ctime>
 #include <iostream>
-
-#include <pcl/console/parse.h>
-#include <pcl/point_types.h>
 #include <pcl/visualization/pcl_visualizer.h>
-#include <pcl/io/openni_grabber.h>
 #include <pcl/sample_consensus/sac_model_plane.h>
 #include <pcl/people/ground_based_people_detection_app.h>
-#include <pcl/common/time.h>
 
-#include <pcl/io/lzf_image_io.h>
+
+//for resampling 
+
+#include <pcl/point_types.h>
+#include <pcl/io/pcd_io.h>
+#include <pcl/kdtree/kdtree_flann.h>
+#include <pcl/surface/mls.h>
+
+
 namespace pc = pcl::console;
 using namespace pcl::visualization;
 using namespace pcl::gpu;
@@ -83,32 +89,43 @@ using namespace std;
 typedef pcl::PointXYZRGBA PointT;
 typedef pcl::PointCloud<PointT> PointCloudT;
 
-//IO variables
- io::LZFDepth16ImageWriter ld;
- io::LZFRGB24ImageWriter lrgb;
-string filename_depth="depth_data";
-string filename_rgb="rgb_data";
-int lzf_fps=8;
-//declarations for people detector on ground plane
-PointCloudT::Ptr cloud_d (new PointCloudT);
-pcl::PointIndices inds;
- bool new_cloud_available_flag_d = false;
-// PCL viewer //
-pcl::visualization::PCLVisualizer viewer_d("PCL Viewer");
-pcl::people::GroundBasedPeopleDetectionApp<PointT> people_detector;    // people detection object
-// Mutex: //
-boost::mutex cloud_mutex_d;
-bool segment_body=false;
-bool fill_holes=false;
-bool no_people_tracked=false;
-bool correct_calibration=true;
-bool detected=false;
-string lzf_dir_global="";
-bool islzf=false;
-enum { COLS = 640, ROWS = 480 };
-Eigen::Vector3f center_person;
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+typedef pcl::PointXYZRGBA PointT;
+typedef pcl::PointCloud<PointT> PointCloudT;
 
- bool valid_inds[COLS * ROWS];
+enum { COLS = 640, ROWS = 480 };
+
+//IO variables
+io::LZFDepth16ImageWriter ld;
+io::LZFRGB24ImageWriter lrgb;
+int lzf_fps=30; //maximum Kinect capturing speed
+string lzf_dir_global="";
+string pcd_file_global="";
+string pcd_dir_global="";
+bool islzf=false;
+
+
+//declarations for people detector on ground plane
+//PointCloudT::Ptr cloud_ground_plane (new PointCloudT);
+bool new_cloud_available_flag_ground_plane = false;
+pcl::visualization::PCLVisualizer viewer_ground_plane("PCL Viewer");
+pcl::people::GroundBasedPeopleDetectionApp<PointT> people_detector_ground_plane;    // people detection object
+// Mutex: //
+boost::mutex cloud_mutex_ground_plane;
+pcl::PointIndices inds;
+bool valid_inds[COLS * ROWS];
+bool detected=false;
+
+bool fill_holes=true ;
+bool correct_calibration=false;
+PointCloudT::Ptr cloud_ground_plane (new PointCloudT);
+
+//flags:
+bool segment_people=false;//flag
+bool resample=false;//flag
+//args
+std::string svm_filename = "/home/alina/workspace/pcl/gpu/people/data/trainedLinearSVMForPeopleDetectionWithHOG.yaml";
+Eigen::VectorXf ground_coeffs;
 
 vector<string> getPcdFilesInDir(const string& directory)
 {
@@ -130,19 +147,90 @@ vector<string> getPcdFilesInDir(const string& directory)
   return result;
 }
 
+
+//not used yet, resampling directly on the depth image in source_cb1_resample
+ void resample_point_cloud(PointCloud<PointXYZRGBA>::Ptr cloud_src, PointCloud<PointXYZRGBA>::Ptr cloud_target){
+
+	//pcl::PointCloud<PointXYZRGBA>::Ptr cloud_filtered (new pcl::PointCloud<pcl::PointXYZ>);
+
+	  // Fill in the cloud data
+	  
+
+	pcl::copyPointCloud(*cloud_src, *cloud_target);
+
+	cloud_target->width  = COLS;
+	  cloud_target->height = ROWS;
+	  cloud_target->points.resize (cloud_target->width * 		cloud_target->height);
+
+
+ // Create a KD-Tree
+ // pcl::search::KdTree<PointXYZRGBA>::Ptr tree (new pcl::search::KdTree<PointXYZRGBA>);
+  // Init object (second point type is for the normals, even if unused)
+ // pcl::MovingLeastSquares<pcl::PointXYZRGBA, pcl::PointXYZRGBA> mls;
+ 
+  //mls.setComputeNormals (true);
+/*
+  // Set parameters
+  mls.setInputCloud (cloud_src);
+  mls.setPolynomialFit (true);
+  mls.setSearchMethod (tree);
+  mls.setSearchRadius (0.03);
+ mls.setUpsamplingMethod (MovingLeastSquares<pcl::PointXYZRGBA, pcl::PointXYZRGBA>::SAMPLE_LOCAL_PLANE);
+  mls.setUpsamplingRadius (0.025);
+  mls.setUpsamplingStepSize (0.01);
+
+  // Reconstruct
+  mls.process ( *cloud_target);
+*/
+
+	int factor_h=ROWS/cloud_src->height;
+	int factor_w=COLS/cloud_src->width;
+	
+
+	for(size_t x = 0; x < COLS; ++x){
+		for(size_t y = 0; y <ROWS; ++y){
+  			int y_old= y/factor_h; 	 
+			int x_old= x/factor_w; 
+			int position_old=y_old*cloud_src->width+x_old;
+			//unsigned short depth_val=static_cast<unsigned short>(cloud_host_.points[position_old].z )*1000.0; //m -> mm
+			//depth_host_.points[r*COLS+c]=depth_val;
+			 cloud_target->points[y*COLS+x].z=cloud_src->points[position_old].z;
+		}
+  	}
+
+
+
+
+}
+
+
 void cloud_cb_2 (const PointCloudT::ConstPtr &callback_cloud, PointCloudT::Ptr& cloud,
     bool* new_cloud_available_flag)
 {
-  cloud_mutex_d.lock ();    // for not overwriting the point cloud from another thread
+//std::cout <<"cloud_cb_2" << std::endl;
+  cloud_mutex_ground_plane.lock ();    // for not overwriting the point cloud from another thread
   *cloud = *callback_cloud;
+
+//resampling
+/*
+pcl::PointCloud<PointXYZRGBA>::Ptr cloud_src (new pcl::PointCloud<pcl::PointXYZRGBA>);
+	pcl::copyPointCloud(*callback_cloud, *cloud_src);
+	pcl::PointCloud<PointXYZRGBA>::Ptr cloud_resampled (new pcl::PointCloud<pcl::PointXYZRGBA>);
+	resample_point_cloud(cloud_src,cloud_resampled);
+
+*/
+       // pcl::copyPointCloud(*cloud_resampled, *cloud);
+
+
   *new_cloud_available_flag = true;
- cloud_mutex_d.unlock ();
+ cloud_mutex_ground_plane.unlock ();
 }
 
 struct callback_args{
   // structure used to pass arguments to the callback function
   PointCloudT::Ptr clicked_points_3d;
   pcl::visualization::PCLVisualizer::Ptr viewerPtr;
+
 };
 
 void
@@ -259,8 +347,8 @@ class PeoplePCDApp
    	  Eigen::Vector3f j_projected_parent=people_detector_.project3dTo2d(j1);
    	Eigen::Vector3f j_projected_child=people_detector_.project3dTo2d(j2);
 
-   	depth_view_.addLine((int)j_projected_parent[0],(int)j_projected_parent[1],(int)j_projected_child[0],(int)j_projected_child[1],"limbs",5000);
-   	final_view_.addLine((int)j_projected_parent[0],(int)j_projected_parent[1],(int)j_projected_child[0],(int)j_projected_child[1],"limbs",5000);
+   	depth_view_.addLine((int)j_projected_parent[0],(int)j_projected_parent[1],(int)j_projected_child[0],(int)j_projected_child[1],200,0,0,"limbs",5000);
+   	final_view_.addLine((int)j_projected_parent[0],(int)j_projected_parent[1],(int)j_projected_child[0],(int)j_projected_child[1],200,0,0,"limbs",5000);
 
 depth_view_.addCircle((int)j_projected_parent[0],(int)j_projected_parent[1],10.0,"circle",5000);
  final_view_.addCircle((int)j_projected_parent[0],(int)j_projected_parent[1],10.0,"circle",5000);
@@ -389,409 +477,48 @@ void drawAllLimbs(){
       }
     }
 
-    void source_cb1(const boost::shared_ptr<const PointCloud<PointXYZRGBA> >& cloud)
-    {
 
-      {
-        boost::mutex::scoped_lock lock(data_ready_mutex_);
-        if (exit_)
-          return;
-	
-        pcl::copyPointCloud(*cloud, cloud_host_);
-	
-
-
-      }
-      data_ready_cond_.notify_one();
-    }
-
-
-
-
-
-
-
-
-
-
-
-
-
-    void source_cb2(const boost::shared_ptr<openni_wrapper::Image>& image_wrapper, const boost::shared_ptr<openni_wrapper::DepthImage>& depth_wrapper, float)
-    {
-      {
-        boost::mutex::scoped_try_lock lock(data_ready_mutex_);
-
-        if (exit_ || !lock)
-          return;
-
-        //getting depth
-
-        int w = depth_wrapper->getWidth();
-        int h = depth_wrapper->getHeight();
-
-        int s = w * PeopleDetector::Depth::elem_size;
-
-        depth_host_.points.resize(w *h);
-        depth_host_.width = w;
-        depth_host_.height = h;
-
-        const unsigned short *data = depth_wrapper->getDepthMetaData().Data();
-         unsigned short data2[w * h];
+   //Segments the body in depth_host_
+    void segment_body_depth(){
+	 //std::cout <<"segment_body" << std::endl;
 	unsigned short depth_invalid_value=10000;
-         std::copy(data, data + w * h, &data2[0]);
-       pcl::PointCloud<unsigned short> *depth_host_backup(new pcl::PointCloud<unsigned short>);
-        depth_host_backup->points.resize(w *h);
-        depth_host_backup->width = w;
-        depth_host_backup->height = h;
-	if (no_people_tracked==true){
-	//we assume that depth_host_ contains the old values
-
-
-		for (int i=0; i<depth_host_.points.size();i++){
-			depth_host_backup->points[i]=depth_host_.points[i];
-			if (segment_body==true){
-				if(depth_host_.points[i]==depth_invalid_value)
-				data2[i]=depth_invalid_value;
-
-			}
-
-
-		}
-
-	}
-
-        std::copy(data2, data2 + w * h, &depth_host_.points[0]);
-       // std::copy(data2, data2 + w * h, &depth_host_backup->points[0]);
-
-        depth_host_.points.resize(w *h);
-               depth_host_.width = w;
-               depth_host_.height = h;
-       
-
-       //if we want to use the body cluster
-
-	if (no_people_tracked==false){
-        for (int i=0; i<depth_host_.points.size();i++){
-        	depth_host_backup->points[i]=depth_host_.points[i];
-		if (segment_body==true){
-			depth_host_.points[i]=depth_invalid_value;
-			data2[i]=depth_invalid_value;
-			if (detected==true)
-				valid_inds[i]=false;
-			}
-
-
-        	}
-
- 	Eigen::Vector4f min;
-       Eigen::Vector4f max;
-       pcl::getMinMax3D(*people_detector.getNoGroundCloud(),inds.indices, min, max);
-       Eigen::Vector3f min_2d=people_detector_.project3dTo2d(min);
-       Eigen::Vector3f max_2d=people_detector_.project3dTo2d(max);
-	float mean_x=(min_2d[0]+max_2d[0])/2.0;
-	float mean_y=(min_2d[1]+max_2d[1])/2.0;
-	float mean_depth=0.0;
-	int sum_depth=0;
-
-	int max_y=0;
-/*
-	if (segment_body==true){
-	if (detected==true){
-
-        for (int i=0; i<inds.indices.size();i++){
-
-
-        	pcl::PointXYZRGBA point = people_detector.getNoGroundCloud()->points[inds.indices[i]];
-        	float x=point.x;
-        	float y=point.y;
-        	float z=point.z;
-
-        	Eigen::Vector4f temp;
-        	temp[0]=x;
-        	temp[1]=y;
-        	temp[2]=z;
-        	temp[3]=1;
-
-        	Eigen::Vector3f temp2=people_detector_.project3dTo2d(temp);
-
-		if (temp2[1]>max_y)
-			max_y=(int)temp2[1];
-		
-
-        	//setting the corresponding values
-        	if (((int)temp2[1])<ROWS && ((int)temp2[0])<COLS && ((int)temp2[1])>0 && ((int)temp2[0])>0){
-		valid_inds[((int)temp2[1])*w+((int)temp2[0])]=true;
-        	// depth_host_.points[((int)temp2[1])*w+((int)temp2[0])]=depth_host_backup->points[((int)temp2[1])*w+((int)temp2[0])];
-             //data2[((int)temp2[1])*w+((int)temp2[0])]=depth_host_backup->points[((int)temp2[1])*w+((int)temp2[0])];
-        	}
-
-        	//filling i all +-10 values
-
-float mean_x=(min_2d[0]+max_2d[0])/2.0;
-
-
-
-		int min_j=-20;
-		int max_j=20;
-		if ((int)temp2[0]<mean_x)
-			min_j=5;
-		if ((int)temp2[0]>mean_x)
-			max_j=5;
-
-	mean_depth+=depth_host_backup->points[((int)temp2[1])*w+((int)temp2[0])];
-	sum_depth++;
-        	for (int j=-10; j<10; j++){
-        		for (int k=-10; k<10;k++){//cols
-
-        			if (((int)temp2[1]+k)<ROWS && ((int)temp2[0])+j<COLS && ((int)temp2[1]+k)>0 && ((int)temp2[0])+j>0){
-
-        			//depth_host_.points[((int)temp2[1]+k)*w+((int)temp2[0])+j]=10000;
-                	//data2[((int)temp2[1]+k)*w+((int)temp2[0])+j]=10000;
-			valid_inds[((int)temp2[1]+k)*w+((int)temp2[0])+j]=true;
-                	//depth_host_.points[((int)temp2[1]+k)*w+((int)temp2[0])+j]=depth_host_backup->points[((int)temp2[1]+k)*w+((int)temp2[0])+j];
-                	//data2[((int)temp2[1]+k)*w+((int)temp2[0])+j]=depth_host_backup->points[((int)temp2[1]+k)*w+((int)temp2[0])+j];
-        			}
-
-
-        		}
-
-
-        	}//end filling +-10
-}
-
-
-                	//depth_host_.points[((int)temp2[1])*w+((int)temp2[0])]=depth_host_backup->points[((int)temp2[1])*w+((int)temp2[0])];
-                	//data2[((int)temp2[1])*w+((int)temp2[0])]=depth_host_backup->points[((int)temp2[1])*w+((int)temp2[0])];
-
-
-                }
-}
-
-
-
-
-*/
-
-
- //if we want to use the bounding box
-
-      // Eigen::Vector4f min;
-      // Eigen::Vector4f max;
-       pcl::getMinMax3D(*people_detector.getNoGroundCloud(),inds.indices, min, max);
-     //  Eigen::Vector3f min_2d=people_detector_.project3dTo2d(min);
-     //  Eigen::Vector3f max_2d=people_detector_.project3dTo2d(max);
-
-       std::cout << "MIN " << min_2d<<std::endl;
-       std::cout << "MAX " << max_2d<<std::endl;
-max_y=max_2d[1];
-       for (long i=0; i<depth_host_.points.size();i++){
-
-
-
-		   long y=i/w;
-		   long x=i-y*w;
-		   if(x>min_2d[0] && y>min_2d[1] && x<max_2d[0] && y<max_2d[1]){
-			   valid_inds[i]=true;
-			mean_depth+=depth_host_backup->points[i];
-			sum_depth++;
-		   }
-
-       }
-
-
-
-
-mean_depth=mean_depth/sum_depth;
-if(detected){
-float depth_thresh=10;
-for (int i=0; i<ROWS*COLS;i++){
-
-	if (valid_inds[i]==true && !(depth_host_backup->points[i]-mean_depth<depth_thresh)){
-		valid_inds[i]=false;
-		
-		
-	}
-
-}
-}
-
-for (int i=0; i<ROWS*COLS;i++){
-
-	if (valid_inds[i]==true){
-		depth_host_.points[i]=depth_host_backup->points[i];
-		data2[i]=depth_host_backup->points[i];
-		
-	}
-
-}
-
-
-if(fill_holes==true  ){
-        //closing the gaps: rows
-/*
-        for (int i=0; i<h;i++){
-        	int first=-1;
-        	int last=0;
-        	for (int j=0; j<w-1;j++){
-        		if ((data2[i*w+j])!=depth_invalid_value){
-        			if (first==-1){
-        				first=j;
-        			}
-        			last=j;
-        		}
-
-        	}
-        	//filling all the indicies between first and last in the current row
-        	for (int j=first; j<last&&first!=-1;j++){
-
-        		 depth_host_.points[i*w+j]=depth_host_backup->points[i*w+j];
-        		 data2[i*w+j]=depth_host_backup->points[i*w+j];
-
-
-
-        	}
-        }
-*/
-        //closing the gaps: cols
-        for (int i=0; i<w;i++){
-        	int first=0;
-        	int last=0;
-        	for (int j=0; j<h;j++){
-        		if ((data2[j*w+i])!=depth_invalid_value){
-        			if (first==0){
-        				first=j;
-        			}
-        			last=j;
-        		}
-
-        	}
-
- //std::cout <<"max_y"<< max_y<< std::endl;
-		first=last;
-		if (max_y!=0 && max_y-last<10)
-			if  (last+25<h-1)
-				last=last+25;
-			else
-				last=h-2;
-			
-		
-        	//filling all the indicies between first and last in the current column
-        	for (int j=first; j<last;j++){
-
-        		 depth_host_.points[j*w+i]=depth_host_backup->points[j*w+i];
-        		 data2[j*w+i]=depth_host_backup->points[j*w+i];
-
-
-
-        	}
-        }
-}
-
-}
-
-        //END of "if we want to use the body cluster"
-
-        //std::copy(&depth_host_.points[0], &depth_host_.points[0] + w * h, data2);
-        //unsigned short data3[w*h];
-        //std::copy(&data2[0], &data2[0] + w * h, &data3[0]);
-        depth_device_.upload(data2, s, h, w);
-
-
-
-        //std::copy(data, data + w * h, &depth_host_.points[0]);
-
-        //getting image
-        w = image_wrapper->getWidth();
-        h = image_wrapper->getHeight();
-        s = w * PeopleDetector::Image::elem_size;
-
-        //fill rgb array
-        rgb_host_.resize(w * h * 3);
-        image_wrapper->fillRGB(w, h, (unsigned char*)&rgb_host_[0]);
-
-        // convert to rgba, TODO image_wrapper should be updated to support rgba directly
-        rgba_host_.points.resize(w * h);
-        rgba_host_.width = w;
-        rgba_host_.height = h;
-        for(int i = 0; i < rgba_host_.size(); ++i)
-        {
-          const unsigned char *pixel = &rgb_host_[i * 3];
-	RGB& rgba = rgba_host_.points[i];
-	if (correct_calibration && (i%w-8)>0){
-          rgba = rgba_host_.points[i-8];
-	}
-	
-	 
-          rgba.r = pixel[0];
-          rgba.g = pixel[1];
-          rgba.b = pixel[2];
-        }
-        image_device_.upload(&rgba_host_.points[0], s, h, w);
-      }
-      data_ready_cond_.notify_one();
-    }
-
-
-
-  void source_cb3(const boost::shared_ptr<const PointCloud<PointXYZRGBA> >& cloud)
-    {
-
-      {
-        boost::mutex::scoped_lock lock(data_ready_mutex_);
-        if (exit_)
-          return;
-	
-        pcl::copyPointCloud(*cloud_d, cloud_host_);
-	pcl::copyPointCloud(*cloud_d,rgba_host_);
-      
- for(size_t i = 0; i < cloud->points.size(); ++i)
-  {
-   
-    depth_host_.points[i] =static_cast<unsigned short>(cloud_host_.points[i].z * 1000); //m -> mm
-  }
-
-
 	int h=ROWS;
-	int w=COLS;
-	unsigned short depth_invalid_value=10000;
+	int w=COLS ;
 
-	//if a person was tracked 
-	if (detected){
-		for (int i=0; i<depth_host_.points.size();i++){
-				//depth_host_.points[i]=depth_invalid_value;
+	//if a person was tracked: resetting the valid indicies array
+	if (detected)
+		for (int i=0; i<depth_host_.points.size();i++)	
 				valid_inds[i]=false;
 
-        	}
-	}
-
-
+	//minimum and maximum values
 	Eigen::Vector4f min;
-       Eigen::Vector4f max;
-       pcl::getMinMax3D(*people_detector.getNoGroundCloud(),inds.indices, min, max);
-       Eigen::Vector3f min_2d=people_detector_.project3dTo2d(min);
-       Eigen::Vector3f max_2d=people_detector_.project3dTo2d(max);
+	Eigen::Vector4f max;
+	pcl::getMinMax3D(*people_detector_ground_plane.getNoGroundCloud(),inds.indices, min, max);
+	Eigen::Vector3f min_2d=people_detector_.project3dTo2d(min);
+	Eigen::Vector3f max_2d=people_detector_.project3dTo2d(max);
 	float mean_x=(min_2d[0]+max_2d[0])/2.0;
 	float mean_y=(min_2d[1]+max_2d[1])/2.0;
+
+	//variables for depth filtering
 	float mean_depth=0.0;
 	int sum_depth=0;
 	int max_y=0;
 
+	//going through all valid indicies and filling valid_inds if a person was detected
+ 	for (int i=0; i<inds.indices.size() && detected;i++){
 
-        for (int i=0; i<inds.indices.size() && detected;i++){//going through all valid indicies and filling vlid_inds if a person was detected
 
-
-        	pcl::PointXYZRGBA point = people_detector.getNoGroundCloud()->points[inds.indices[i]];
+        	pcl::PointXYZRGBA point = people_detector_ground_plane.getNoGroundCloud()->points[inds.indices[i]];
+		//projecting to 2D
         	float x=point.x;
         	float y=point.y;
         	float z=point.z;
-
-        	Eigen::Vector4f temp;
+	       	Eigen::Vector4f temp;
         	temp[0]=x;
         	temp[1]=y;
         	temp[2]=z;
         	temp[3]=1;
-
+		//resulting 2D point
         	Eigen::Vector3f projected=people_detector_.project3dTo2d(temp);
 
 
@@ -802,42 +529,40 @@ if(fill_holes==true  ){
 
         	//setting the corresponding values
         	if (((int)projected[1])<ROWS && ((int)projected[0])<COLS && ((int)projected[1])>0 && ((int)projected[0])>0){
-		valid_inds[((int)projected[1])*w+((int)projected[0])]=true;
+			valid_inds[((int)projected[1])*w+((int)projected[0])]=true;
         	}
 
-        	//filling all +-10 values
-
+        	//hole filling part 1
 		float mean_x=(min_2d[0]+max_2d[0])/2.0;
+		float mean_y=(min_2d[1]+max_2d[1])/2.0;
 		int min_j=-20;
 		int max_j=20;
 		if ((int)projected[0]<mean_x)
-			min_j=5;
+			min_j=0;
 		if ((int)projected[0]>mean_x)
-			max_j=5;
+			max_j=0;
+		int min_k=-5;
+		int max_k=5;
+		if ((int)projected[1]<mean_y)
+			min_k=0;
+		if ((int)projected[1]>mean_y)
+			max_k=0;
+
+        	for (int j= min_j; j<max_j; j++){
+        		for (int k=min_k; k<max_k;k++){
+        			if (((int)projected[1]+k)<ROWS && ((int)projected[0])+j<COLS && ((int)projected[1]+k)>0 && ((int)projected[0])+j>0){
+					valid_inds[((int)projected[1]+k)*w+((int)projected[0])+j]=true;
+        			}
+			}
 
 		//for  depth filtering
 		mean_depth+=depth_host_.points[((int)projected[1])*w+((int)projected[0])];
 		sum_depth++;
 
-        	for (int j=-10; j<10; j++){
-        		for (int k=-10; k<10;k++){
-
-        			if (((int)projected[1]+k)<ROWS && ((int)projected[0])+j<COLS && ((int)projected[1]+k)>0 && ((int)projected[0])+j>0){
-				valid_inds[((int)projected[1]+k)*w+((int)projected[0])+j]=true;
-
-        			}
-			}
-
 
          
-		}//end filling +-10
+		}//end of hole filling
 	}//end of filling valid_inds
-
-
-
-
-
-	mean_depth=mean_depth/sum_depth;
 
 	//Extending the legs
         for (int i=0; i<w;i++){
@@ -866,23 +591,255 @@ if(fill_holes==true  ){
         	for (int j=first; j<last;j++)
         		 valid_inds[j*w+i]=true;
 
-}
-
-
-
-
-	if(detected){
-	float depth_thresh=200;
-	for (int i=0; i<ROWS*COLS;i++){
-
-		if (valid_inds[i]==false || !(depth_host_.points[i]-mean_depth<depth_thresh))
-			depth_host_.points[i]=depth_invalid_value;
-
-			
-		}
 	}
 
 
+        //closing the gaps: rows
+
+        for (int i=0; i<h;i++){
+        	int first=-1;
+        	int last=0;
+        	for (int j=0; j<w-1;j++){
+        		if ((valid_inds[i*w+j])){
+        			if (first==-1){
+        				first=j;
+        			}
+        			last=j;
+        		}
+
+        	}
+        	//filling all the indicies between first and last in the current row
+        	for (int j=first; j<last&&first!=-1;j++){
+
+        		 valid_inds[i*w+j]=true;
+        		
+
+
+
+        	}
+        }
+
+        //closing the gaps: cols
+        for (int i=0; i<w;i++){
+        	int first=0;
+        	int last=0;
+        	for (int j=0; j<h;j++){
+        		if (valid_inds[j*w+i]){
+        			if (first==0){
+        				first=j;
+        			}
+        			last=j;
+        		}
+
+        	}
+
+ //std::cout <<"max_y"<< max_y<< std::endl;
+		//first=last;
+		if (max_y!=0 && max_y-last<10)
+			if  (last+25<h-1)
+				last=last+25;
+			else
+				last=h-2;
+			
+		
+        	//filling all the indicies between first and last in the current column
+        	for (int j=first; j<last;j++){
+
+        		valid_inds[j*w+i]=true;
+
+
+
+        	}
+        
+
+
+}
+	
+	float depth_thresh=200.0f;
+	mean_depth=mean_depth/sum_depth;
+	//Filling the depth image
+	for (int i=0; i<ROWS*COLS;i++)
+		if (valid_inds[i]==false || !(depth_host_.points[i]-mean_depth<depth_thresh))
+			depth_host_.points[i]=depth_invalid_value;
+
+
+}
+
+
+  void source_cb1_resampled(const boost::shared_ptr<const PointCloud<PointXYZRGBA> >& cloud)
+    {
+	
+
+      {
+
+
+        boost::mutex::scoped_lock lock(data_ready_mutex_);
+        if (exit_)
+          return;
+	//cloud->is_dense = false;
+	//cloud->resize(COLS*ROWS);
+	pcl::PointCloud<PointXYZRGBA>::Ptr cloud_src (new pcl::PointCloud<pcl::PointXYZRGBA>);
+	pcl::copyPointCloud(*cloud, *cloud_src);
+	pcl::PointCloud<PointXYZRGBA>::Ptr cloud_resampled (new pcl::PointCloud<pcl::PointXYZRGBA>);
+	//resample_point_cloud(cloud_src,cloud_resampled);
+        //pcl::copyPointCloud(*cloud_resampled, cloud_host_);
+	pcl::copyPointCloud(*cloud, cloud_host_);
+
+
+	int factor_h=ROWS/cloud->height;
+	int factor_w=COLS/cloud->width;
+	
+	double depth_mean=0.0;
+	int depth_sum=0;
+	for(size_t c = 0; c < COLS; ++c){
+		for(size_t r = 0; r <ROWS; ++r){
+  			int r_old= r/factor_h; 	 
+			int c_old= c/factor_w; 
+			int position_old=r_old*cloud->width+c_old;
+			unsigned short depth_val=static_cast<unsigned short>(cloud_host_.points[position_old].z )*1000.0; //m -> mm
+			/* If we want some smoothing (did not improve anything)
+			
+			if (r_old>0 && r_old<cloud->height-1 &&c_old>0 && c_old<cloud->width-1){
+			depth_val+=static_cast<unsigned short>(cloud_host_.points[position_old+1].z )*1000.0;
+			depth_val+=static_cast<unsigned short>(cloud_host_.points[position_old-1].z )*1000.0;
+			depth_val+=static_cast<unsigned short>(cloud_host_.points[position_old+cloud->width].z )*1000.0;
+			depth_val+=static_cast<unsigned short>(cloud_host_.points[position_old-cloud->width].z )*1000.0;
+			depth_val=depth_val/6.0;
+			}
+			*/
+			depth_host_.points[r*COLS+c]=depth_val;
+			
+			if (ROWS-r<110 ||r<50||COLS-c<200||c<200 ){
+				depth_host_.points[r*COLS+c]=10000;}
+			else{
+				depth_mean+=depth_val;
+				depth_sum++;
+				}
+
+		}
+  	}
+depth_mean=depth_mean/depth_sum;
+
+ for(size_t i = 0; i <  depth_host_.points.size(); ++i)
+  {
+   if( depth_host_.points[i]>depth_mean-200){
+    depth_host_.points[i] =10000; //m -> mm
+}
+
+  }
+
+	int w=COLS;
+	int h=ROWS;
+	//uploading the data
+	int s = w * PeopleDetector::Depth::elem_size;
+		depth_device_.upload(&depth_host_.points[0], s, h, w);
+	s = w * PeopleDetector::Image::elem_size;
+		image_device_.upload(&rgba_host_.points[0], s, h, w);
+	
+      }
+      data_ready_cond_.notify_one();
+    }
+
+
+
+
+
+    void source_cb1(const boost::shared_ptr<const PointCloud<PointXYZRGBA> >& cloud)
+    {
+      {          
+        boost::mutex::scoped_lock lock(data_ready_mutex_);
+        if (exit_)
+          return;
+	
+
+        pcl::copyPointCloud(*cloud, cloud_host_);        
+      }
+      data_ready_cond_.notify_one();
+    }
+
+
+
+
+
+    void source_cb2(const boost::shared_ptr<openni_wrapper::Image>& image_wrapper, const boost::shared_ptr<openni_wrapper::DepthImage>& depth_wrapper, float)
+    {
+
+	
+      {                    
+        boost::mutex::scoped_try_lock lock(data_ready_mutex_);
+
+        if (exit_ || !lock)
+          return;
+                 
+        //getting depth
+        int w = depth_wrapper->getWidth();
+        int h = depth_wrapper->getHeight();
+        int s = w * PeopleDetector::Depth::elem_size;
+        const unsigned short *data = depth_wrapper->getDepthMetaData().Data();
+
+        
+
+        depth_host_.points.resize(w *h);
+        depth_host_.width = w;
+        depth_host_.height = h;
+        std::copy(data, data + w * h, &depth_host_.points[0]);
+	w = image_wrapper->getWidth();
+        h = image_wrapper->getHeight();
+        
+	if (segment_people)
+		segment_body_depth();
+	
+        depth_device_.upload(&depth_host_.points[0], s, h, w);              
+        //getting image
+        
+        
+        //fill rgb array
+        rgb_host_.resize(w * h * 3);        
+        image_wrapper->fillRGB(w, h, (unsigned char*)&rgb_host_[0]);
+
+        // convert to rgba, TODO image_wrapper should be updated to support rgba directly
+        rgba_host_.points.resize(w * h);
+        rgba_host_.width = w;
+        rgba_host_.height = h;
+	s = w * PeopleDetector::Image::elem_size;
+        for(int i = 0; i < rgba_host_.size(); ++i)
+        {
+          const unsigned char *pixel = &rgb_host_[i * 3];
+          RGB& rgba = rgba_host_.points[i];         
+          rgba.r = pixel[0];
+          rgba.g = pixel[1];
+          rgba.b = pixel[2];
+        }
+        image_device_.upload(&rgba_host_.points[0], s, h, w);       
+      }
+      data_ready_cond_.notify_one();
+
+
+    }
+
+
+
+  void source_cb3(const boost::shared_ptr<const PointCloud<PointXYZRGBA> >& cloud)
+    {
+
+      {
+        boost::mutex::scoped_lock lock(data_ready_mutex_);
+        if (exit_)
+          return;
+	
+        pcl::copyPointCloud(*cloud_ground_plane, cloud_host_);
+	pcl::copyPointCloud(*cloud_ground_plane,rgba_host_);
+      
+ for(size_t i = 0; i < cloud->points.size(); ++i)
+  {
+   
+    depth_host_.points[i] =static_cast<unsigned short>(cloud_host_.points[i].z * 1000); //m -> mm
+  }
+
+	if (segment_people)
+		segment_body_depth();
+	int w=COLS;
+	int h=ROWS;
 	//uploading the data
 	int s = w * PeopleDetector::Depth::elem_size;
 		depth_device_.upload(&depth_host_.points[0], s, h, w);
@@ -896,19 +853,6 @@ if(fill_holes==true  ){
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
     void
     startMainLoop ()
     {
@@ -919,9 +863,7 @@ if(fill_holes==true  ){
 
 
     	  // Algorithm parameters:
-    	 // std::string svm_filename = "/home/roitberg/workspace/pcl/gpu/people/data/trainedLinearSVMForPeopleDetectionWithHOG.yaml";
-    	  std::string svm_filename = "/home/alina/workspace/pcl/gpu/people/data/trainedLinearSVMForPeopleDetectionWithHOG.yaml";
-
+    	 
     	  float min_confidence = -2.0;
     	  float min_height = 0.9;
     	  float max_height = 2.3;
@@ -937,41 +879,56 @@ if(fill_holes==true  ){
 
     	  // Read Kinect live stream:
 
+	PCDGrabberBase* ispcd = dynamic_cast<pcl::PCDGrabberBase*>(&capture_);
+    	 pcl::Grabber* interface;
 
-    	  pcl::Grabber* interface = new pcl::OpenNIGrabber();
-	if( islzf)
-	  interface = new pcl::ImageGrabber<PointXYZRGBA>(lzf_dir_global,lzf_fps, false, true) ;
- 
-    	  boost::function<void (const pcl::PointCloud<pcl::PointXYZRGBA>::ConstPtr&)> f =
-    	  boost::bind (&cloud_cb_2, _1, cloud_d, &new_cloud_available_flag_d);
+if( islzf ){
+ std::cout << "lzf." << std::endl;
+	  	interface = new pcl::ImageGrabber<PointXYZRGBA>(lzf_dir_global,lzf_fps, false, true) ;}
+	else if (ispcd ){
+ std::cout << "pcd." << std::endl;
+vector<string> pcd_files = getPcdFilesInDir(pcd_dir_global);
+		interface = new pcl::PCDGrabber<PointXYZRGBA>(pcd_files, 1, true);
+}
+	else{ std::cout << "ni." << std::endl;
+		interface = new pcl::OpenNIGrabber();}
+
+	 boost::function<void (const pcl::PointCloud<pcl::PointXYZRGBA>::ConstPtr&)> f =
+    	  boost::bind (&cloud_cb_2, _1, cloud_ground_plane, &new_cloud_available_flag_ground_plane);
+
+
     	  interface->registerCallback (f);
+
+
+	//if (segment_people and !resample){
+ 	 
     	  interface->start ();
 
     	  // Wait for the first frame:
-    	  while(!new_cloud_available_flag_d)
+    	  while(!new_cloud_available_flag_ground_plane)
     	    boost::this_thread::sleep(boost::posix_time::milliseconds(1));
-    	  new_cloud_available_flag_d = false;
+    	  new_cloud_available_flag_ground_plane= false;
 
-    	  cloud_mutex_d.lock ();    // for not overwriting the point cloud
+    	  cloud_mutex_ground_plane.lock ();    // for not overwriting the point cloud
 
     	  // Display pointcloud:
-    	  pcl::visualization::PointCloudColorHandlerRGBField<PointT> rgb(cloud_d);
-    	  viewer_d.addPointCloud<PointT> (cloud_d, rgb, "input_cloud");
-    	  viewer_d.setCameraPosition(0,0,-2,0,-1,0,0);
+    	  pcl::visualization::PointCloudColorHandlerRGBField<PointT> rgb(cloud_ground_plane);
+    	  viewer_ground_plane.addPointCloud<PointT> (cloud_ground_plane, rgb, "input_cloud");
+    	  viewer_ground_plane.setCameraPosition(0,0,-2,0,-1,0,0);
 
     	  // Add point picking callback to viewer:
     	  struct callback_args cb_args;
     	  PointCloudT::Ptr clicked_points_3d (new PointCloudT);
     	  cb_args.clicked_points_3d = clicked_points_3d;
-    	  cb_args.viewerPtr = pcl::visualization::PCLVisualizer::Ptr(&viewer_d);
-    	  viewer_d.registerPointPickingCallback (pp_callback, (void*)&cb_args);
+    	  cb_args.viewerPtr = pcl::visualization::PCLVisualizer::Ptr(&viewer_ground_plane);
+    	  viewer_ground_plane.registerPointPickingCallback (pp_callback, (void*)&cb_args);
     	  std::cout << "Shift+click on three floor points, then press 'Q'..." << std::endl;
 
     	  // Spin until 'Q' is pressed:
-    	  viewer_d.spin();
-    	  std::cout << "done." << std::endl;
+    	  viewer_ground_plane.spin();
+    	 
 
-    	  cloud_mutex_d.unlock ();
+    	  cloud_mutex_ground_plane.unlock ();
 
     	  // Ground plane estimation:
     	  Eigen::VectorXf ground_coeffs;
@@ -983,33 +940,34 @@ if(fill_holes==true  ){
     	  model_plane.computeModelCoefficients(clicked_points_indices,ground_coeffs);
     	  std::cout << "Ground plane: " << ground_coeffs(0) << " " << ground_coeffs(1) << " " << ground_coeffs(2) << " " << ground_coeffs(3) << std::endl;
 
-    	  viewer_d.close();
-
+    	  viewer_ground_plane.close();
+	
     	  // Initialize new viewer:
-    	  pcl::visualization::PCLVisualizer viewer_d("PCL Viewer");          // viewer initialization
-    	  viewer_d.setCameraPosition(0,0,-2,0,-1,0,0);
+    	  pcl::visualization::PCLVisualizer viewer_ground_plane("PCL Viewer");          // viewer initialization
+    	  viewer_ground_plane.setCameraPosition(0,0,-2,0,-1,0,0);
 
-
+	
     	  // Create classifier for people detection:
     	  pcl::people::PersonClassifier<pcl::RGB> person_classifier;
 
     	  person_classifier.loadSVMFromFile(svm_filename);   // load trained SVM
-
+	
     	  // People detection app initialization:
 
-    	  people_detector.setVoxelSize(voxel_size);                        // set the voxel size
-    	  people_detector.setIntrinsics(rgb_intrinsics_matrix);            // set RGB camera intrinsic parameters
-    	  people_detector.setClassifier(person_classifier);                // set person classifier
-    	  people_detector.setHeightLimits(min_height, max_height);         // set person classifier
-    	  people_detector.setSamplingFactor(sampling_factor);              // set a downsampling factor to the point cloud (for increasing speed)
+    	  people_detector_ground_plane.setVoxelSize(voxel_size);                        // set the voxel size
+    	  people_detector_ground_plane.setIntrinsics(rgb_intrinsics_matrix);            // set RGB camera intrinsic parameters
+    	  people_detector_ground_plane.setClassifier(person_classifier);                // set person classifier
+    	  people_detector_ground_plane.setHeightLimits(min_height, max_height);         // set person classifier
+    	  people_detector_ground_plane.setSamplingFactor(sampling_factor);              // set a downsampling factor to the point cloud (for increasing speed)
 
-    	  people_detector.setMinimumDistanceBetweenHeads(1.0);
+    	  people_detector_ground_plane.setMinimumDistanceBetweenHeads(1.0);
     	  //-----------end of people detection-----------
 
-
+//}
+	
       cloud_cb_ = false;
 	
-      PCDGrabberBase* ispcd = dynamic_cast<pcl::PCDGrabberBase*>(&capture_);
+      
 
       if (ispcd || islzf)
         cloud_cb_= true;
@@ -1021,9 +979,28 @@ if(fill_holes==true  ){
       boost::function<void (const ImagePtr&, const DepthImagePtr&, float constant)> func2 = boost::bind (&PeoplePCDApp::source_cb2, this, _1, _2, _3);
 
 	boost::function<void (const boost::shared_ptr<const PointCloud<PointXYZRGBA> >&)> func3 = boost::bind (&PeoplePCDApp::source_cb3, this, _1);
-      
 
-      boost::signals2::connection c = cloud_cb_ ? capture_.registerCallback (func3) : capture_.registerCallback (func2);
+	 boost::function<void (const boost::shared_ptr<const PointCloud<PointXYZRGBA> >&)> func1_resampled = boost::bind (&PeoplePCDApp::source_cb1_resampled, this, _1);
+
+
+	 boost::signals2::connection c;
+	if (cloud_cb_ && segment_people){
+		c=capture_.registerCallback (func3);
+	}
+	else
+	if (cloud_cb_ && resample){
+		c=capture_.registerCallback (func1_resampled);
+	}
+	else
+	if (cloud_cb_){
+		c=capture_.registerCallback (func1);
+	}
+	else{
+
+		c=capture_.registerCallback (func2);
+	}
+
+      //boost::signals2::connection c = cloud_cb_ ? capture_.registerCallback (func3) : capture_.registerCallback (func2);
 
       {
         boost::unique_lock<boost::mutex> lock(data_ready_mutex_);
@@ -1037,21 +1014,22 @@ if(fill_holes==true  ){
         	  //PEOPLE DETECTION
 
 
-      	    if (new_cloud_available_flag_d && cloud_mutex_d.try_lock ())    // if a new cloud is available
+      	    if (segment_people && ! resample &&  new_cloud_available_flag_ground_plane)    // if a new cloud is available
       	    {
-      	      new_cloud_available_flag_d = false;
+		cloud_mutex_ground_plane.try_lock ();
+      	      new_cloud_available_flag_ground_plane= false;
 
       	      // Perform people detection on the new cloud:
       	      std::vector<pcl::people::PersonCluster<PointT> > clusters;   // vector containing persons clusters
-      	      people_detector.setInputCloud(cloud_d);
-      	      people_detector.setGround(ground_coeffs);                    // set floor coefficients
-      	      people_detector.compute(clusters);                           // perform people detection
+      	      people_detector_ground_plane.setInputCloud(cloud_ground_plane);
+      	      people_detector_ground_plane.setGround(ground_coeffs);                    // set floor coefficients
+      	      people_detector_ground_plane.compute(clusters);                           // perform people detection
 
-      	      ground_coeffs = people_detector.getGround();                 // get updated floor coefficients
-      	      viewer_d.removeAllPointClouds();
-      	      viewer_d.removeAllShapes();
-      	      pcl::visualization::PointCloudColorHandlerRGBField<PointT> rgb(cloud_d);
-      	      viewer_d.addPointCloud<PointT> (cloud_d, rgb, "input_cloud");
+      	      ground_coeffs = people_detector_ground_plane.getGround();                 // get updated floor coefficients
+      	      viewer_ground_plane.removeAllPointClouds();
+      	      viewer_ground_plane.removeAllShapes();
+      	      pcl::visualization::PointCloudColorHandlerRGBField<PointT> rgb(cloud_ground_plane);
+      	      viewer_ground_plane.addPointCloud<PointT> (cloud_ground_plane, rgb, "input_cloud");
 
 
       	  
@@ -1083,31 +1061,28 @@ inds.indices.clear();
       	      }
       	    if(conf >min_confidence ){
 
-      	    	it_maxconf->drawTBoundingBox(viewer_d, k_maxconf);
+      	    	it_maxconf->drawTBoundingBox(viewer_ground_plane, k_maxconf);
       	    	inds=it_maxconf->getIndices();
 }
 	detected=(k>0);
 
-      	    viewer_d.spinOnce();
+      	    viewer_ground_plane.spinOnce();
 
       	   // pcl::PointIndices *indss ;
-      	  //people_detector.getGrountPlaneInds(indss);
+      	  //people_detector_ground_plane.getGrountPlaneInds(indss);
 
 		//no_people_tracked=(k<1);
 
 
-      	      std::cout << k << " people found" << std::endl;
+      	      //std::cout << k << " people found" << std::endl;
       	      //viewer.spinOnce();
 
 
-      	      cloud_mutex_d.unlock ();
+      	      cloud_mutex_ground_plane.unlock ();
 
-      	    std::cout << k << people_detector.getNoGroundCloud()->height<< people_detector.getNoGroundCloud()->width << std::endl;
-      	 // const pcl::PointCloud::ConstPtr &cloud3=people_detector.getNoGroundCloud()->makeShared();
-      	  pcl::people::GroundBasedPeopleDetectionApp<PointT>::PointCloudPtr cl3=people_detector.getNoGroundCloud();
-      	  cl3->points.resize(COLS*ROWS);
-      	std::cout  << " cl3->size(): " << cl3->size()<<std::endl;
-      	std::cout  << " cloud_d->size()" <<cloud_d->size()<< std::endl;
+      	    
+      	 // const pcl::PointCloud::ConstPtr &cloud3=people_detector_ground_plane.getNoGroundCloud()->makeShared();
+      	
 
    	    }
 
@@ -1120,7 +1095,7 @@ inds.indices.clear();
             {
               SampledScopeTime fps(time_ms_);
 
-              if (cloud_cb_ and false)
+              if (cloud_cb_ && ! segment_people && ! resample)
                 process_return_ = people_detector_.process(cloud_host_.makeShared());
               else
               {
@@ -1133,7 +1108,7 @@ inds.indices.clear();
 
             if(has_data ){
              visualizeAndWrite();
-            } //visualizeAndWrite();
+            } 
 
            }
 
@@ -1210,6 +1185,7 @@ int main(int argc, char** argv)
 
   bool write = 0;
   pc::parse_argument (argc, argv, "-w", write);
+ 
 
 
   // selecting data source
@@ -1237,13 +1213,15 @@ int main(int argc, char** argv)
     else
     if (pc::parse_argument (argc, argv, "-pcd", pcd_file) > 0)
     {
-      capture.reset( new pcl::PCDGrabber<PointXYZRGBA>(vector<string>(31, pcd_file), 30, true) );
+	pcd_file_global=pcd_file;
+      capture.reset( new pcl::PCDGrabber<PointXYZRGBA>(vector<string>(31, pcd_file), 1, true) );
     }
     else
     if (pc::parse_argument (argc, argv, "-pcd_folder", pcd_folder) > 0)
     {
+	pcd_dir_global=pcd_folder;
       vector<string> pcd_files = getPcdFilesInDir(pcd_folder);
-      capture.reset( new pcl::PCDGrabber<PointXYZRGBA>(pcd_files, 30, true) );
+      capture.reset( new pcl::PCDGrabber<PointXYZRGBA>(pcd_files,1, true) );
     }
     else
     {
@@ -1269,6 +1247,15 @@ int main(int argc, char** argv)
   pc::parse_argument (argc, argv, "-tree1", tree_files[1]);
   pc::parse_argument (argc, argv, "-tree2", tree_files[2]);
   pc::parse_argument (argc, argv, "-tree3", tree_files[3]);
+ 
+  if (pc::parse_argument (argc, argv, "-segment_people", svm_filename)> 0)
+    {
+	segment_people=true;
+    }
+   
+  pc::parse_argument (argc, argv, "-resample", resample);
+  pc::parse_argument (argc, argv, "-lzf_fps", lzf_fps);
+
 
   int num_trees = (int)tree_files.size();
   pc::parse_argument (argc, argv, "-numTrees", num_trees);
@@ -1280,6 +1267,8 @@ int main(int argc, char** argv)
     print_help();
     return -1;
   }
+
+
 
   try
   {
