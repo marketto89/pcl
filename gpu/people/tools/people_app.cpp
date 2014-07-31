@@ -103,7 +103,7 @@ string lzf_dir_global="";
 string pcd_file_global="";
 string pcd_dir_global="";
 bool islzf=false;
-
+bool tracking=false;
 
 //declarations for people detector on ground plane
 //PointCloudT::Ptr cloud_ground_plane (new PointCloudT);
@@ -296,6 +296,13 @@ savePNGFile (const std::string& filename, const pcl::PointCloud<T>& cloud)
   pcl::io::savePNGFile(filename, cloud);
 }
 
+
+
+/////////////////////////////TRACKER///////////////////
+
+
+
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class PeoplePCDApp
 {
@@ -350,10 +357,10 @@ class PeoplePCDApp
    	depth_view_.addLine((int)j_projected_parent[0],(int)j_projected_parent[1],(int)j_projected_child[0],(int)j_projected_child[1],200,0,0,"limbs",5000);
    	final_view_.addLine((int)j_projected_parent[0],(int)j_projected_parent[1],(int)j_projected_child[0],(int)j_projected_child[1],200,0,0,"limbs",5000);
 
-depth_view_.addCircle((int)j_projected_parent[0],(int)j_projected_parent[1],10.0,"circle",5000);
- final_view_.addCircle((int)j_projected_parent[0],(int)j_projected_parent[1],10.0,"circle",5000);
-depth_view_.addCircle((int)j_projected_child[0],(int)j_projected_child[1],10.0,"circle",5000);
- final_view_.addCircle((int)j_projected_child[0],(int)j_projected_child[1],10.0,"circle",5000);
+depth_view_.addCircle((int)j_projected_parent[0],(int)j_projected_parent[1],5.0,"circle",5000);
+ final_view_.addCircle((int)j_projected_parent[0],(int)j_projected_parent[1],5.0,"circle",5000);
+depth_view_.addCircle((int)j_projected_child[0],(int)j_projected_child[1],5.0,"circle",5000);
+ final_view_.addCircle((int)j_projected_child[0],(int)j_projected_child[1],5.0,"circle",5000);
 
 
    	 return 1;
@@ -464,11 +471,14 @@ void drawAllLimbs(){
         savePNGFile(make_name(counter_, "d1"), people_detector_.depth_device1_);
         savePNGFile(make_name(counter_, "d2"), people_detector_.depth_device2_);*/
         skeleton_file.open("./skeleton.txt", std::ios::app);
-        skeleton_file << "\n"<<counter_<<";"<<time_ms_<<";";
+        skeleton_file << "\n"<<counter_<<" "<<time_ms_;
+	skeleton_file << "\n";
         for (int i=0; i<27;i++){
 
                 	  Eigen::Vector4f j=people_detector_.skeleton_joints[i];
-                	  skeleton_file<<"{"<<j[0]<<","<<j[1]<<","<<j[2]<<"};";
+			  
+                	  skeleton_file << j[0]<<" "<<j[1]<<" "<<j[2];
+			  skeleton_file << "\n";
 
 
                   }
@@ -548,8 +558,8 @@ void drawAllLimbs(){
 		if ((int)projected[1]>mean_y)
 			max_k=0;
 
-        	for (int j= min_j; j<max_j; j++){
-        		for (int k=min_k; k<max_k;k++){
+        	for (int j= -10; j<10; j++){
+        		for (int k=-10; k<10;k++){
         			if (((int)projected[1]+k)<ROWS && ((int)projected[0])+j<COLS && ((int)projected[1]+k)>0 && ((int)projected[0])+j>0){
 					valid_inds[((int)projected[1]+k)*w+((int)projected[0])+j]=true;
         			}
@@ -564,34 +574,7 @@ void drawAllLimbs(){
 		}//end of hole filling
 	}//end of filling valid_inds
 
-	//Extending the legs
-        for (int i=0; i<w;i++){
-        	int first=0;
-        	int last=0;
-        	for (int j=0; j<h;j++){
-        		if ((valid_inds[j*w+i])==true){
-        			if (first==0){
-        				first=j;
-        			}
-        			last=j;
-        		}
-
-        	}
-
- 
-		first=last;
-		if (max_y!=0 && max_y-last<10)
-			if  (last+25<h-1)
-				last=last+25;
-			else
-				last=h-2;
-			
-		
-        	//filling all the indicies between first and last in the current column
-        	for (int j=first; j<last;j++)
-        		 valid_inds[j*w+i]=true;
-
-	}
+	
 
 
         //closing the gaps: rows
@@ -635,7 +618,7 @@ void drawAllLimbs(){
 
  //std::cout <<"max_y"<< max_y<< std::endl;
 		//first=last;
-		if (max_y!=0 && max_y-last<10)
+		if (max_y!=0 && max_y-last<40)
 			if  (last+25<h-1)
 				last=last+25;
 			else
@@ -654,12 +637,22 @@ void drawAllLimbs(){
 
 
 }
+
+
+
+//Depth filtering
 	
-	float depth_thresh=200.0f;
+	float depth_thresh=250.0f;
 	mean_depth=mean_depth/sum_depth;
-	//Filling the depth image
+
 	for (int i=0; i<ROWS*COLS;i++)
-		if (valid_inds[i]==false || !(depth_host_.points[i]-mean_depth<depth_thresh))
+		if ((depth_host_.points[i]-mean_depth)>depth_thresh)
+			valid_inds[i]=false;
+	
+
+//Filling the depth image
+	for (int i=0; i<ROWS*COLS;i++)
+		if (valid_inds[i]==false)
 			depth_host_.points[i]=depth_invalid_value;
 
 
@@ -856,7 +849,7 @@ depth_mean=depth_mean/depth_sum;
     void
     startMainLoop ()
     {
-
+	people_detector_.setActiveTracking(tracking);
 
     	//--------People detection------
 
@@ -865,8 +858,8 @@ depth_mean=depth_mean/depth_sum;
     	  // Algorithm parameters:
     	 
     	  float min_confidence = -2.0;
-    	  float min_height = 0.9;
-    	  float max_height = 2.3;
+    	  float min_height = 0.6;
+    	  float max_height = 1.9;
     	  //float min_height = 0.3;
     	  //float max_height = 2.3;
     	  float voxel_size = 0.06;
@@ -1021,6 +1014,19 @@ vector<string> pcd_files = getPcdFilesInDir(pcd_dir_global);
 
       	      // Perform people detection on the new cloud:
       	      std::vector<pcl::people::PersonCluster<PointT> > clusters;   // vector containing persons clusters
+
+		int shift=8;
+		for (int x = 0; x < COLS-shift; x++){
+  			for (int y = 0; y < ROWS; y++){
+					cloud_ground_plane->points[y*COLS+x].r=cloud_ground_plane->points[y*COLS+x+shift].r;
+					cloud_ground_plane->points[y*COLS+x].g=cloud_ground_plane->points[y*COLS+x+shift].g;
+					cloud_ground_plane->points[y*COLS+x].b=cloud_ground_plane->points[y*COLS+x+shift].b;
+ 
+
+
+			}
+		}
+
       	      people_detector_ground_plane.setInputCloud(cloud_ground_plane);
       	      people_detector_ground_plane.setGround(ground_coeffs);                    // set floor coefficients
       	      people_detector_ground_plane.compute(clusters);                           // perform people detection
@@ -1194,6 +1200,8 @@ int main(int argc, char** argv)
 
   try
   {
+ pc::parse_argument (argc, argv, "-lzf_fps", lzf_fps);
+ pc::parse_argument (argc, argv, "-tracking", tracking);
     if (pc::parse_argument (argc, argv, "-dev", openni_device) > 0)
     {
       capture.reset( new pcl::OpenNIGrabber(openni_device) );
@@ -1254,8 +1262,7 @@ int main(int argc, char** argv)
     }
    
   pc::parse_argument (argc, argv, "-resample", resample);
-  pc::parse_argument (argc, argv, "-lzf_fps", lzf_fps);
-
+ 
 
   int num_trees = (int)tree_files.size();
   pc::parse_argument (argc, argv, "-numTrees", num_trees);
@@ -1281,6 +1288,7 @@ int main(int argc, char** argv)
     PeoplePCDApp app(*capture, write);
     app.people_detector_.rdf_detector_ = rdf;
 
+    
     // executing
     app.startMainLoop ();
   }

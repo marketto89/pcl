@@ -74,6 +74,7 @@ namespace pcl
     //part_t const body_parts[] =  {Lfoot,Lleg, Lknee,Lthigh,Rfoot,Rleg,Rknee,Rthigh,Rhips,Lhips,Neck,Rarm,Relbow,Rforearm,Rhand,Larm,Lelbow,Lforearm,Lhand,FaceLB,FaceRB,FaceLT,FaceRT,Rchest,Lchest};
     //char* const body_parts_str[] = {"Lfoot","Lleg", "Lknee","Lthigh","Rfoot","Rleg","Rknee","Rthigh","Rhips","Lhips","Neck","Rarm","Relbow","Rforearm","Rhand","Larm","Lelbow","Lforearm","Lhand","FaceLB","FaceRB","FaceLT","FaceRT","Rchest","Lchest"};
     const int num_parts_labeled=25;
+
     const int num_parts_all=27;//including shoulders
 
       class PCL_EXPORTS PeopleDetector
@@ -98,13 +99,16 @@ namespace pcl
 
           /** \brief Class constructor. */
           PeopleDetector ();
+
           
           /** \brief Class destructor. */
           ~PeopleDetector () {}                   
 
           /** \brief User must set non standard intrinsics */
           void
-          setIntrinsics (float fx, float fy, float cx = -1, float cy = -1);                    
+          setIntrinsics (float fx, float fy, float cx = -1, float cy = -1);
+                    
+	  void setActiveTracking(bool value);
 
           /** \brief Possible will be removed because of extra overheads */
           int
@@ -160,11 +164,27 @@ namespace pcl
           Mask                        fg_mask_;
           Mask                        fg_mask_grown_;
 
-          Eigen::Vector4f skeleton_joints[num_parts_labeled];
+
+	
+
+          Eigen::Vector4f skeleton_joints[num_parts_all];
+	//Used for tracking
+	  Eigen::Vector4f joints_velocity[num_parts_all];
+	  Eigen::Vector4f skeleton_joints_prev[num_parts_all];
+	  Eigen::Vector4f mean_vals;
+	  bool active_tracking;
+	  float dt;
+	  float alpha_tracking;
+	  float beta_tracking;
+	  void alphaBetaTracking();
+	  
+
+
           Blob2 skeleton_blobs[num_parts_all];
           int estimateJoints (const std::vector<std::vector <Blob2, Eigen::aligned_allocator<Blob2> > >&  sorted,Tree2& tree,int part_label,int part_lid);
           int calculateIntersectionPoint (Blob2 part1, Blob2 part2, Eigen::Vector4f &intersection_point);
           void calculateAddtionalJoints();
+
 
           void getMaxDist (const pcl::PointCloud<PointXYZ> &cloud,  Eigen::Vector4f &pivot_pt, Eigen::Vector4f &max_pt);
 
