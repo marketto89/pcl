@@ -99,7 +99,7 @@ enum
 //IO variables
 io::LZFDepth16ImageWriter ld;
 io::LZFRGB24ImageWriter lrgb;
-int lzf_fps = 10;
+int lzf_fps = 30;
 string lzf_dir_global = "";
 string pcd_file_global = "";
 string pcd_dir_global = "";
@@ -109,6 +109,7 @@ bool islzf = false;
 
 bool new_cloud_available_flag_ground_plane = false;
 pcl::visualization::PCLVisualizer viewer_ground_plane ("PCL Viewer");
+
 pcl::people::GroundBasedPeopleDetectionApp<PointT> people_detector_ground_plane;    // people detection object
 // Mutex: //
 boost::mutex cloud_mutex_ground_plane;
@@ -333,8 +334,8 @@ class PeoplePCDApp
       final_view_.setSize (COLS, ROWS);
       depth_view_.setSize (COLS, ROWS);
 
-      final_view_.setPosition (0, 0);
-      depth_view_.setPosition (650, 0);
+      final_view_.setPosition (0, 400);
+      depth_view_.setPosition (650, 400);
 
       cmap_device_.create (ROWS, COLS);
       cmap_host_.points.resize (COLS * ROWS);
@@ -871,6 +872,7 @@ class PeoplePCDApp
 
       // Display pointcloud:
       pcl::visualization::PointCloudColorHandlerRGBField<PointT> rgb (cloud_ground_plane);
+
       viewer_ground_plane.addPointCloud<PointT> (cloud_ground_plane, rgb, "input_cloud");
       viewer_ground_plane.setCameraPosition (0, 0, -2, 0, -1, 0, 0);
 
@@ -880,7 +882,7 @@ class PeoplePCDApp
       cb_args.clicked_points_3d = clicked_points_3d;
       cb_args.viewerPtr = pcl::visualization::PCLVisualizer::Ptr (&viewer_ground_plane);
       viewer_ground_plane.registerPointPickingCallback (pp_callback, (void*) &cb_args);
-      std::cout << "Shift+click on three floor points, then press 'Q'..." << std::endl;
+
 
       // Spin until 'Q' is pressed:
       viewer_ground_plane.spin ();
@@ -891,17 +893,19 @@ class PeoplePCDApp
       Eigen::VectorXf ground_coeffs;
       ground_coeffs.resize (4);
       std::vector<int> clicked_points_indices;
+
+        std::cout << "Shift+click on three floor points, then press 'Q'..." << std::endl;
       for (unsigned int i = 0; i < clicked_points_3d->points.size (); i++)
         clicked_points_indices.push_back (i);
       pcl::SampleConsensusModelPlane<PointT> model_plane (clicked_points_3d);
       model_plane.computeModelCoefficients (clicked_points_indices, ground_coeffs);
       std::cout << "Ground plane: " << ground_coeffs (0) << " " << ground_coeffs (1) << " " << ground_coeffs (2) << " " << ground_coeffs (3) << std::endl;
 
-      viewer_ground_plane.close ();
+     // viewer_ground_plane.close ();
 
       // Initialize new viewer:
-      pcl::visualization::PCLVisualizer viewer_ground_plane ("PCL Viewer");          // viewer initialization
-      viewer_ground_plane.setCameraPosition (0, 0, -2, 0, -1, 0, 0);
+     // pcl::visualization::PCLVisualizer viewer_ground_plane ("PCL Viewer");          // viewer initialization
+      //viewer_ground_plane.setCameraPosition (0, 0, -2, 0, -1, 0, 0);
 
       // Create classifier for people detection:
       pcl::people::PersonClassifier<pcl::RGB> person_classifier;
@@ -1155,7 +1159,7 @@ main (int argc,
   pc::parse_argument (argc, argv, "-w", write);
 
   // selecting data source
-  boost::shared_ptr<pcl::Grabber> capture (new pcl::OpenNIGrabber ());
+  boost::shared_ptr<pcl::Grabber> capture;
   string openni_device, oni_file, pcd_file, pcd_folder, lzf_dir;
 
   try
@@ -1173,6 +1177,7 @@ main (int argc,
     }
     else if (pc::parse_argument (argc, argv, "-lzf", lzf_dir) > 0)
     {
+
       capture.reset (new pcl::ImageGrabber<PointXYZRGBA> (lzf_dir, lzf_fps, false, true));
       lzf_dir_global = lzf_dir;
       islzf = true;
@@ -1190,6 +1195,7 @@ main (int argc,
     }
     else
     {
+      cout<<"Here2"<<endl;
       capture.reset (new pcl::OpenNIGrabber ());
       //capture.reset( new pcl::ONIGrabber("d:/onis/20111013-224932.oni", true, true) );
 
@@ -1256,7 +1262,7 @@ main (int argc,
     {
       app.people_detector_.setBetaTracking (beta);
     }
-    if (pc::parse_argument (argc, argv, "-activeTracking", tracking) > 0)
+    if (pc::parse_argument (argc, argv, "-tracking", tracking) > 0)
     {
       app.people_detector_.setActiveTracking (tracking);
     }
