@@ -77,14 +77,6 @@
 
 #include <pcl/common/time.h>
 
-//for people detection
-
-#include <pcl/console/parse.h>
-#include <pcl/point_types.h>
-#include <pcl/visualization/pcl_visualizer.h>
-#include <pcl/io/openni_grabber.h>
-#include <pcl/sample_consensus/sac_model_plane.h>
-
 #define AREA_THRES      200 // for euclidean clusterization 1 
 #define AREA_THRES2     100 // for euclidean clusterization 2
 #define CLUST_TOL_SHS   0.1
@@ -127,6 +119,7 @@ pcl::gpu::people::PeopleDetector::PeopleDetector () :
     joints_velocity_[i] = Eigen::Vector4f (0.0, 0.0, 0.0, 0.0);
   }
 
+  //stores the body centroid (value not used yet)
   mean_vals_ = Eigen::Vector4f (0.0, 0.0, 0.0, 0.0);
 
   // allocation buffers with default sizes
@@ -136,6 +129,9 @@ pcl::gpu::people::PeopleDetector::PeopleDetector () :
   allocate_buffers ();
 }
 
+/*
+ *Enables/disables tracking
+ */
 void
 pcl::gpu::people::PeopleDetector::setActiveTracking (bool value)
 {
@@ -143,6 +139,9 @@ pcl::gpu::people::PeopleDetector::setActiveTracking (bool value)
 
 }
 
+/**
+ * Set alpha parameter for tracking
+ */
 void
 pcl::gpu::people::PeopleDetector::setAlphaTracking (float value)
 {
@@ -150,6 +149,9 @@ pcl::gpu::people::PeopleDetector::setAlphaTracking (float value)
 
 }
 
+/**
+ * Set beta parameter for tracking
+ */
 void
 pcl::gpu::people::PeopleDetector::setBetaTracking (float value)
 {
@@ -210,9 +212,10 @@ pcl::gpu::people::PeopleDetector::allocate_buffers (int rows,
   fg_mask_grown_.create (rows, cols);
 }
 
-/*
- * Calculates the 2D position of the joint using the given intrinsics
- *(Used fo rlater visualization)
+/**
+ * Calculates 2D coordinates of the joint
+ * @param[in] point_3d 3d position of the joint
+ * @return 2D coordinates
  */
 Eigen::Vector3f
 pcl::gpu::people::PeopleDetector::project3dTo2d (Eigen::Vector4f point_3d)
@@ -459,7 +462,7 @@ pcl::gpu::people::PeopleDetector::getMaxDist (const pcl::PointCloud<PointXYZ> &c
 
 /**
  * Calculates/corrects the position of following joints:
- * Shoulders, ELbows(if the ELbow-Blob is missing), hips and
+ * Shoulders, ELbows(if the Elbow-Blob is missing) and hips
  */
 void
 pcl::gpu::people::PeopleDetector::calculateAddtionalJoints ()
@@ -564,14 +567,14 @@ pcl::gpu::people::PeopleDetector::calculateAddtionalJoints ()
 }
 
 /*
- * Joint tracking based on their previos positions and velocities
+ * Joint tracking based on their previous positions and velocities
  */
 void
 pcl::gpu::people::PeopleDetector::alphaBetaTracking ()
 {
 
-  float outlier_thresh = 1.8;  //Outliers above this threshhold are dismissed (old value is used)
-  float outlier_thresh2 = 0.1;
+  float outlier_thresh = 1.8;  //Outliers above this threshold are dismissed (old value is used)
+  float outlier_thresh2 = 0.1;  //Used for special handling of the hands. If the hands position change is higher then thresh2, tracking parameters are set higher (position change happens faster)
   float outlier_thresh3 = 0.15;  //for hand correction
 
   for (int i = 0; i < num_parts_all; i++)
@@ -587,16 +590,19 @@ pcl::gpu::people::PeopleDetector::alphaBetaTracking ()
     //hand 
 
     //hand correction
+    //Left hand
     if (i == Lhand && skeleton_joints_[Lforearm][0] != -1 && skeleton_joints_[Lelbow][0] != -1)
     {
+      //Expected position based on forearm and elbow positions
       Eigen::Vector4f dir = skeleton_joints_[Lforearm] - skeleton_joints_[Lelbow];
       if (dir.norm () < 0.04)
         dir *= 2.0;
       Eigen::Vector4f corrected = skeleton_joints_[Lforearm] + dir;
-
+      //If the measured position is too far away from the expected position we use the expected position
       if ( ( (corrected - measured).norm () > outlier_thresh3 && !valid2) || (corrected - measured).norm () > 0.3)
         measured = corrected;
     }
+    //Right hand (same as left hand)
     if (i == Rhand && skeleton_joints_[Rforearm][0] != -1 && skeleton_joints_[Relbow][0] != -1)
     {
       Eigen::Vector4f dir = skeleton_joints_[Rforearm] - skeleton_joints_[Relbow];
@@ -610,25 +616,29 @@ pcl::gpu::people::PeopleDetector::alphaBetaTracking ()
 
     valid = (measured - (prev)).norm () < outlier_thresh;
 
+    //going through all dimensions
     for (int dim = 0; dim < 3; dim++)
     {
 
       float xm = measured[dim];
 
-      float xk = prev[dim] + (velocity_prev[dim] * dt_);
-      float vk = velocity_prev[dim];
-      float rk = xm - xk;
+      float xk = prev[dim] + (velocity_prev[dim] * dt_);    //predicted position
+      float vk = velocity_prev[dim];    //velocity update
+      float rk = xm - xk;    //difference between measured and predicted
+
       //new position and velocity
-      if (prev[dim] == -1.0 || prev[dim] == 0.0)
+      if (prev[dim] == -1.0 || prev[dim] == 0.0)    //if the old values are invalid, use the new ones
       {
         xk = measured[dim];
         vk = 0.0;
       }
       else
       {
-        if (valid && ! (xm == -1) && ! (xm == 0))
+        if (valid && ! (xm == -1) && ! (xm == 0))    //Apply tracking
         {
-
+          //If its the hands, arms and elbows and the joint has moved fast
+          //we increase the tracking parameters, so that the position changes faster
+          //the reason is that hand position might change much faster then the position of other joints
           if (!valid2 && i != Lhand && i != Rhand && i != Lforearm && i != Rforearm && i != Lelbow && i != Relbow && i != Lfoot && i != Rfoot)
           {
             xk += alpha_tracking_ * rk * 0.2;
@@ -638,14 +648,14 @@ pcl::gpu::people::PeopleDetector::alphaBetaTracking ()
           else
           {
 
-            if (i == Lhand || i == Rhand)
+            if (i == Lhand || i == Rhand)          //Increase the velocity update if it is a hand (because the hand position changes much faster)
             {
               xk += alpha_tracking_ * rk;
               vk += (beta_tracking_ * 5.0 * rk) / dt_;
 
             }
             else
-            {
+            {          //If it's not a hand use usual tracking parameters
 
               xk += alpha_tracking_ * rk;
               vk += (beta_tracking_ * rk) / dt_;
@@ -669,6 +679,12 @@ pcl::gpu::people::PeopleDetector::alphaBetaTracking ()
   }
 }
 
+/**
+ *Goes recursively through all the children of the tree and calculate the positions of the joints
+ *@param[in] tree the blob tree which we search to estimate the optimal blob for every joint
+ *@param[in] part_label label of the part we a building the tree from (e.g. Neck)
+ *@param[in] id of the blob from which we build the tree (usually 0. There might be several blobs with the same label, they are sorted by the size.)
+ */
 int
 pcl::gpu::people::PeopleDetector::estimateJoints (const std::vector<std::vector<Blob2, Eigen::aligned_allocator<Blob2> > >& sorted,
                                                   Tree2& tree,

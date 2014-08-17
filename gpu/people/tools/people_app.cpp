@@ -203,6 +203,10 @@ resample_point_cloud (PointCloud<PointXYZRGBA>::Ptr cloud_src,
 
 }
 
+
+/**
+ * Cloud callback for Ground Plane People Detector
+ */
 void
 cloud_cb_2 (const PointCloudT::ConstPtr &callback_cloud,
             PointCloudT::Ptr& cloud,
@@ -351,6 +355,9 @@ class PeoplePCDApp
 
     }
 
+    /**
+     * Adds a line to Depth and RGB views between the joints parent and child
+     */
     int
     drawLimb (int parent,
               int child)
@@ -380,6 +387,9 @@ class PeoplePCDApp
 
     }
 
+    /*
+     * Draws the whole skeleton
+     */
     void
     drawAllLimbs ()
     {
@@ -491,11 +501,14 @@ class PeoplePCDApp
       }
     }
 
-    //Segments the body in depth_host_
+    /*Segments the body in depth_host_
+     *Sets all depth values that do not belong to the body to 10000
+     *In the end the segmented depth image is uploaded to depth_device
+     */
     void
     segment_body_depth ()
     {
-      //std::cout <<"segment_body" << std::endl;
+
       unsigned short depth_invalid_value = 10000;
       int h = ROWS;
       int w = COLS;
@@ -1195,7 +1208,7 @@ main (int argc,
     }
     else
     {
-      cout<<"Here2"<<endl;
+
       capture.reset (new pcl::OpenNIGrabber ());
       //capture.reset( new pcl::ONIGrabber("d:/onis/20111013-224932.oni", true, true) );
 

@@ -193,17 +193,27 @@ namespace pcl
 
           void
           alphaBetaTracking ();
+
+          /**
+           *Goes recursively through all the children of the tree and calculate the positions of the joints
+           *@param[in] tree the blob tree which we search to estimate the optimal blob for every joint
+           *@param[in] part_label label of the part we a building the tree from (e.g. Neck)
+           *@param[in] id of the blob from which we build the tree (usually 0. There might be several blobs with the same label, they are sorted by the size.)
+           */
           int
           estimateJoints (const std::vector<std::vector<Blob2, Eigen::aligned_allocator<Blob2> > >& sorted,
                           Tree2& tree,
                           int part_label,
                           int part_lid);
-          int
-          calculateIntersectionPoint (Blob2 part1,
-                                      Blob2 part2,
-                                      Eigen::Vector4f &intersection_point);
+
+          /**
+           * Calculates/corrects the position of following joints:
+           * Shoulders, ELbows(if the Elbow-Blob is missing) and hips
+           */
           void
           calculateAddtionalJoints ();
+
+
           void
           getMaxDist (const pcl::PointCloud<PointXYZ> &cloud,
                       Eigen::Vector4f &pivot_pt,
@@ -212,6 +222,11 @@ namespace pcl
           int
           process ();
 
+          /**
+           * Calculates 2D coordinates of the joint
+           * @param[in] point_3d 3d position of the joint
+           * @return 2D coordinates
+           */
           Eigen::Vector3f
           project3dTo2d (Eigen::Vector4f point_3d);
 
