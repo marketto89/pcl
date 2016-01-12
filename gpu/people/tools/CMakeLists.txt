@@ -1,3 +1,6 @@
+
+set(CMAKE_BUILD_TYPE Debug)
+
 if(NOT VTK_FOUND)
   set(DEFAULT FALSE)
   set(REASON "VTK was not found.")
@@ -18,6 +21,9 @@ include_directories(${VTK_INCLUDE_DIRS})
 
 PCL_ADD_EXECUTABLE(pcl_people_app "${SUBSYS_NAME}" people_app.cpp)
 target_link_libraries (pcl_people_app pcl_common pcl_filters pcl_kdtree pcl_segmentation pcl_kdtree pcl_gpu_people pcl_filters pcl_io pcl_visualization ${Boost_LIBRARIES})
+
+PCL_ADD_EXECUTABLE(pcl_people_app_ros "${SUBSYS_NAME}" people_app_ros.cpp)
+target_link_libraries (pcl_people_app_ros pcl_common pcl_filters pcl_kdtree pcl_segmentation pcl_kdtree pcl_gpu_people pcl_filters pcl_io pcl_visualization ${Boost_LIBRARIES})
 
 PCL_ADD_EXECUTABLE(pcl_activity_recognition_app "${SUBSYS_NAME}" activity_recognition_app.cpp)
 target_link_libraries (pcl_activity_recognition_app pcl_common pcl_gpu_people pcl_io ${Boost_LIBRARIES})
