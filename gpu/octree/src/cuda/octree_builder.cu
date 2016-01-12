@@ -36,6 +36,8 @@
 
 #include "internal.hpp"
 
+#include <float.h>
+
 #include "pcl/gpu/utils/timers_cuda.hpp"
 #include "pcl/gpu/utils/device/funcattrib.hpp"
 #include "pcl/gpu/utils/device/algorithm.hpp"
