@@ -68,7 +68,7 @@
 #include <pcl/sample_consensus/sac_model_plane.h>
 #include <pcl/people/ground_based_people_detection_app.h>
 
-//for resampling 
+//for resampling
 
 #include <pcl/point_types.h>
 #include <pcl/io/pcd_io.h>
@@ -769,9 +769,9 @@ class PeoplePCDApp
     {
 
       {
-
+        std::cout << "source cb 2: scoped_try_lock lock(data_ready_mutex)" << std::endl;
         boost::mutex::scoped_try_lock lock (data_ready_mutex_);
-
+        std::cout << "source cb 2: after scoped_try_lock lock(data_ready_mutex)" << std::endl;
         if (exit_ || !lock)
           return;
 
@@ -813,6 +813,7 @@ class PeoplePCDApp
         }
         image_device_.upload (&rgba_host_.points[0], s, h, w);
       }
+        std::cout << "source cb 2: notify_one() on data_ready_cond()" << std::endl;
       data_ready_cond_.notify_one ();
 
     }
@@ -822,6 +823,7 @@ class PeoplePCDApp
     {
 
       {
+            std::cout << "source cb 3: scoped_lock lock(data_ready_mutex)" << std::endl;
         boost::mutex::scoped_lock lock (data_ready_mutex_);
         if (exit_)
           return;
@@ -868,6 +870,7 @@ class PeoplePCDApp
       rgb_intrinsics_matrix << 525, 0.0, 319.5, 0.0, 525, 239.5, 0.0, 0.0, 1.0;  // Kinect RGB camera intrinsics
 
       // Read Kinect live stream:
+
       PCDGrabberBase* ispcd = dynamic_cast<pcl::PCDGrabberBase*> (&capture_);
 
       boost::function<void
@@ -988,7 +991,9 @@ class PeoplePCDApp
 
             if (segment_people && !resample && new_cloud_available_flag_ground_plane)    // if a new cloud is available
             {
+              std::cout << "main thread: try_lock on cloud_mutex_ground_plane" << std::endl;
               cloud_mutex_ground_plane.try_lock ();
+              std::cout << "main thread: after try_lock on cloud_mutex_ground_plane" << std::endl;
               new_cloud_available_flag_ground_plane = false;
 
               // Perform people detection on the new cloud:
@@ -1052,15 +1057,18 @@ class PeoplePCDApp
 
               //viewer.spinOnce();
 
+              std::cout << "main thread: unlock on cloud_mutex_ground_plane" << std::endl;
               cloud_mutex_ground_plane.unlock ();
-
+                std::cout << "main thread: after unlock on cloud_mutex_ground_plane" << std::endl;
             }
 
             //NORMAl people labeling
-
+            std::cout << "main thread: data_ready_cond.timed_wait(lock, 100ms)" << std::endl;
             bool has_data = data_ready_cond_.timed_wait (lock, boost::posix_time::millisec (100));
+            std::cout << "main thread: after data_ready_cond.timed_wait(lock, 100ms)" << std::endl;
             if (has_data)
             {
+                std::cout << "main thread: HAS DATA! data_ready_cond.timed_wait(lock, 100ms)" << std::endl;
               SampledScopeTime fps (time_ms_);
 
               if (cloud_cb_ && !segment_people && !resample)
@@ -1092,10 +1100,8 @@ class PeoplePCDApp
           cout << "Exception" << endl;
         }
 
-        std::cout << "Stopping" << std::endl;
         capture_.stop ();
       }
-      std::cout << "Disconnecting.." << std::endl;
       c.disconnect ();
     }
 
